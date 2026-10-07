@@ -1,10 +1,11 @@
 "use client";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Bot, CheckCheck } from "lucide-react";
+import { CheckCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Badge, Button, EmptyState, PageHeader, Panel, Sheet } from "@/components/ui";
 import { PrepCard } from "@/components/app/evi";
+import { AGENT_SPRITE, EviSprite } from "@/components/app/evi-mascot";
 import { useUI } from "@/components/app/ui-state";
 import { useAppointments, useFollowUps, useVisits } from "@/lib/hooks";
 import { agents, prepSummary, type Finding } from "@/lib/insight";
@@ -44,7 +45,7 @@ function Agents() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {agents.map((a) => (
           <Panel key={a.id} className="flex flex-col p-4">
-            <div className="flex items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-lg bg-active text-primary"><Bot className="size-[18px]" /></span>
+            <div className="flex items-start gap-3"><EviSprite index={AGENT_SPRITE[a.id]} width={72} />
               <div><h2 className="text-[15px] font-semibold">{a.name}</h2><p className="mt-0.5 text-[13px] text-muted">{a.description}</p></div></div>
             <p className="mt-4 text-sm font-medium">{a.summary()}</p>
             <div className="mt-1 flex flex-wrap gap-1.5">{a.actions.map((x) => <Badge key={x}>{x}</Badge>)}</div>
@@ -55,6 +56,7 @@ function Agents() {
 
       <Sheet open={!!agent} onOpenChange={(o) => !o && close()} width={520} title={agent?.name ?? ""} description={agent?.description}
         footer={pending.length > 0 && <Button variant="secondary" onClick={() => { setReviewed(new Set([...reviewed, ...findings.map((f) => f.id)])); toast.success("All results marked as reviewed"); }}><CheckCheck className="size-4" />Mark all as reviewed</Button>}>
+        {agent && <div className="mb-4 flex items-center gap-3 rounded-lg bg-active/60 p-3"><EviSprite index={AGENT_SPRITE[agent.id]} width={64} /><p className="text-[13px] text-slate-600">{agent.summary()}. Review each item and mark it when done.</p></div>}
         {agent && (findings.length === 0 ? <EmptyState title="Nothing to review" text="This agent found nothing that needs attention." /> : (
           <ul className="space-y-3">
             {findings.map((f) => {

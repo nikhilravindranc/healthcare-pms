@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog } from "radix-ui";
-import { ArrowUp, Maximize2, Minimize2, Sparkles, X } from "lucide-react";
+import { ArrowUp, Maximize2, Minimize2, X } from "lucide-react";
 import { Button, Skeleton } from "@/components/ui";
 import { askEvi, EVI_SUGGESTIONS, prepSummary, type EviAnswer, type PrepSummary } from "@/lib/insight";
 import { api, fmtDate } from "@/lib/db";
@@ -10,6 +10,7 @@ import { useAction } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 import { useUI, type EviOpen } from "./ui-state";
 import { markEviUsed } from "./guide";
+import { EviAvatar, EviPeek } from "./evi-mascot";
 import { toast } from "sonner";
 
 type Msg = { role: "user"; text: string } | { role: "evi"; answer: EviAnswer } | { role: "pending" };
@@ -76,7 +77,7 @@ export function EviDialog({ open, onClose, initial }: { open: boolean; onClose: 
           <Dialog.Title className="sr-only">Ask EVI</Dialog.Title>
           <Dialog.Description className="sr-only">Ask questions about your practice</Dialog.Description>
           <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
-            {!empty && <span className="grid size-6 place-items-center rounded-full bg-active text-primary"><Sparkles className="size-3.5" /></span>}
+            {!empty && <EviAvatar size={26} />}
             <span className="text-sm font-semibold">{empty ? "Ask EVI" : "EVI"}</span>
             <span className="text-xs text-muted">Practice assistant</span>
             <div className="ml-auto flex items-center gap-1">
@@ -125,6 +126,7 @@ export function EviDialog({ open, onClose, initial }: { open: boolean; onClose: 
           )}
           {empty && (
             <div className="px-4 pb-1 pt-3">
+              <div className="mb-3 flex items-end justify-between gap-3 rounded-lg bg-[#EAF3FB]/60 pl-4 pt-3"><p className="pb-3 text-sm"><span className="font-semibold">Hi, I&apos;m EVI.</span><br /><span className="text-muted">Ask me about today&apos;s schedule, waiting patients or follow-ups.</span></p><EviPeek width={104} className="shrink-0" /></div>
               <p className="mb-2 text-xs font-medium text-muted">Suggestions</p>
               <div className="flex flex-col">{EVI_SUGGESTIONS.map((s) => (
                 <button key={s} onClick={() => ask(s)} className="rounded-md px-2.5 py-2 text-left text-sm hover:bg-cloud">{s}</button>

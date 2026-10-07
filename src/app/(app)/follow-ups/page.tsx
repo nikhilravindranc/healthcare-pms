@@ -31,7 +31,7 @@ export default function FollowUpsPage() {
   return (
     <>
       <PageHeader title="Follow-ups" subtitle="Patients who need to return or be contacted" actions={<Button onClick={() => ui.newFollowUp()}><Plus className="size-4" />New follow-up</Button>} />
-      <AgentHint text={`Follow-up Agent found ${agentN} patients needing attention.`} action="Review follow-ups" href="/agents?agent=followup" />
+      <AgentHint agent={0} text={`Follow-up Agent found ${agentN} patients needing attention.`} action="Review follow-ups" href="/agents?agent=followup" />
       <Panel>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-3 pt-1">
           <div role="tablist" aria-label="Follow-up status" className="flex gap-1">

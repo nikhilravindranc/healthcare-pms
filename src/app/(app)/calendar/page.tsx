@@ -71,7 +71,7 @@ export default function CalendarPage() {
       </div>
 
       {view === "day" && date === TODAY && gapCount > 0 && (
-        <AgentHint text={`Appointment Agent found ${gapCount} schedule gaps today.`} action={gaps ? "Hide gaps" : "Review gaps"} onAction={() => setGaps((g) => !g)} />
+        <AgentHint agent={1} text={`Appointment Agent found ${gapCount} schedule gaps today.`} action={gaps ? "Hide gaps" : "Review gaps"} onAction={() => setGaps((g) => !g)} />
       )}
 
       {isLoading ? <Skeleton className="h-[560px] w-full" /> : view === "month" ? (

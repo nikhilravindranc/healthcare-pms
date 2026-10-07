@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { EviSprite } from "./evi-mascot";
 import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Badge, Button } from "@/components/ui";
@@ -38,10 +39,10 @@ export function ApptActions({ a, compact }: { a: Appointment; compact?: boolean 
 }
 
 /** Contextual agent/EVI hint line used at the top of workspaces. */
-export function AgentHint({ text, action, onAction, href }: { text: string; action: string; onAction?: () => void; href?: string }) {
+export function AgentHint({ text, action, onAction, href, agent }: { agent?: number; text: string; action: string; onAction?: () => void; href?: string }) {
   return (
     <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-line bg-white px-3.5 py-2.5 text-[13px]">
-      <Sparkles className="size-4 text-primary" aria-hidden />
+      {agent != null ? <EviSprite index={agent} width={44} /> : <Sparkles className="size-4 text-primary" aria-hidden />}
       <span className="flex-1">{text}</span>
       {href ? <Link href={href} className="font-medium text-primary hover:underline">{action}</Link> : <button onClick={onAction} className="font-medium text-primary hover:underline">{action}</button>}
     </div>

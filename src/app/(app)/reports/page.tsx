@@ -58,7 +58,7 @@ export default function ReportsPage() {
         <Select sm className="w-48" aria-label="Location" value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })}><option value="">All locations</option>{refs?.locations.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
         <span className="self-center text-xs text-muted">{fmtDate(d.days[0].date)} – {fmtDate(TODAY, true)}</span>
       </div>
-      <AgentHint text="Practice Insights Agent: no-shows are highest on Mondays. Reminders the day before may help." action="Open agent" href="/agents?agent=insights" />
+      <AgentHint agent={5} text="Practice Insights Agent: no-shows are highest on Mondays. Reminders the day before may help." action="Open agent" href="/agents?agent=insights" />
 
       {busy ? <div className="grid gap-4"><Skeleton className="h-24" /><Skeleton className="h-72" /></div> : (
         <>

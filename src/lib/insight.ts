@@ -98,7 +98,7 @@ export const agents: AgentDef[] = [
         const last = patientVisits(p.id).find((v) => v.status === "Completed");
         return { id: "r" + p.id, title: pname(p.id), detail: `Last visit ${last ? fmtDate(last.date) + " · " + last.type : "—"}, nothing scheduled`, patientId: p.id, action: "schedule" };
       }),
-    summary: () => `${withoutNext().length} patients due to return`,
+    summary: () => `${withoutNext().length} ${withoutNext().length === 1 ? "patient" : "patients"} due to return`,
   },
   {
     id: "prep", name: "Visit Preparation Agent",
