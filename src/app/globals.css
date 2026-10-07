@@ -39,11 +39,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-*:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-  border-radius: 6px;
+@layer base {
+  *:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
 }
+input:focus-visible, textarea:focus-visible, select:focus-visible { outline: none; }
 
 .brand-gradient { background: linear-gradient(120deg, #2867b2 0%, #26b9cf 55%, #7acfc5 100%); }
 .soft-gradient { background: linear-gradient(120deg, #dcddf5 0%, #bfeaf0 55%, #7acfc5 100%); }
