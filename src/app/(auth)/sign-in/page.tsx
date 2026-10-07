@@ -21,7 +21,7 @@ export default function SignInPage() {
 
   const submit = f.handleSubmit(async (v) => {
     setErr(null);
-    try { await auth.signIn(v.email, v.password); router.replace("/overview"); }
+    try { await auth.signIn(v.email, v.password); router.replace(auth.needsWelcome(v.email) ? "/welcome" : "/overview"); }
     catch (e) { setErr((e as Error).message === "network" ? "network" : "invalid"); }
   });
 

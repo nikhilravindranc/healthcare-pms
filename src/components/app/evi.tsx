@@ -9,6 +9,7 @@ import { api, fmtDate } from "@/lib/db";
 import { useAction } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 import { useUI, type EviOpen } from "./ui-state";
+import { markEviUsed } from "./guide";
 import { toast } from "sonner";
 
 type Msg = { role: "user"; text: string } | { role: "evi"; answer: EviAnswer } | { role: "pending" };
@@ -48,6 +49,7 @@ export function EviDialog({ open, onClose, initial }: { open: boolean; onClose: 
 
   const ask = (text: string, answer?: EviAnswer) => {
     if (!text.trim()) return;
+    markEviUsed();
     setMsgs((m) => [...m, { role: "user", text }, { role: "pending" }]);
     setQ("");
     setTimeout(() => setMsgs((m) => [...m.filter((x) => x.role !== "pending"), { role: "evi", answer: answer ?? askEvi(text) }]), 650);

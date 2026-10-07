@@ -5,6 +5,7 @@ import { Sparkles } from "lucide-react";
 import { Avatar, Badge, Button, EmptyState, Panel, PanelHeader, Select, SkeletonRows, StatusBadge, StatusDot } from "@/components/ui";
 import { ApptActions } from "@/components/app/bits";
 import { useUI } from "@/components/app/ui-state";
+import { GettingStarted } from "@/components/app/guide";
 import { waitLabel } from "@/components/app/panels";
 import { useAppointments, useFollowUps, useNow, useRefs } from "@/lib/hooks";
 import { fmtLong, fmtTime, getPatient, pname, TODAY, toMin } from "@/lib/db";
@@ -58,6 +59,8 @@ export default function OverviewPage() {
           ))}
         </dl>
       </div>
+
+      <GettingStarted />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <Panel>

@@ -11,6 +11,7 @@ export interface UIState {
   newVisit: () => void;
   evi: (o?: EviOpen) => void;
   openSearch: () => void;
+  guide: () => void;
 }
 export const UICtx = createContext<UIState | null>(null);
 export const useUI = () => {

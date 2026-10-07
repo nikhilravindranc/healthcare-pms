@@ -45,6 +45,9 @@ export const auth = {
     const a = accounts().find((x) => x.email === e);
     if (a) write(SKEY, { email: a.email, name: a.name, first: a.first, practice: a.practice ?? "Your practice" });
   },
+  /** True the first time this account signs in; the welcome page marks it seen. */
+  needsWelcome(email: string) { try { return localStorage.getItem("pms.welcomed." + email.toLowerCase()) !== "1"; } catch { return false; } },
+  markWelcomed(email: string) { try { localStorage.setItem("pms.welcomed." + email.toLowerCase(), "1"); } catch {} },
   setPractice(name: string) {
     const s = snapshot(); if (!s) return;
     write(AKEY, accounts().map((a) => (a.email === s.email ? { ...a, practice: name } : a)));

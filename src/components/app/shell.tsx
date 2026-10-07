@@ -17,6 +17,7 @@ import { UICtx, type EviOpen, type UIState } from "./ui-state";
 import { AppointmentPanel, NewAppointmentPanel, NewFollowUpPanel, NewPatientPanel, NewVisitDialog } from "./panels";
 import { EviDialog } from "./evi";
 import { SearchDialog } from "./search";
+import { GuidePanel } from "./guide";
 import { toast } from "sonner";
 
 const MAIN: { href: string; label: string; icon: LucideIcon }[] = [
@@ -57,10 +58,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [newVisit, setNewVisit] = useState(false);
   const [evi, setEvi] = useState<{ open: boolean; init: EviOpen }>({ open: false, init: {} });
   const [searchOpen, setSearchOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const { data: notes } = useNotifications();
   const markRead = useAction(api.markNotifications);
 
   useEffect(() => { if (session === null) router.replace("/sign-in"); }, [session, router]);
+  useEffect(() => { if (new URLSearchParams(window.location.search).get("guide")) { setGuideOpen(true); window.history.replaceState(null, "", window.location.pathname); } }, []);
   useEffect(() => { try { const v = localStorage.getItem("pms.sidebar"); setCollapsed(v ? v === "1" : window.innerWidth < 1024); } catch {} }, []);
 
   const ui = useMemo<UIState>(() => ({
@@ -71,6 +74,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     newVisit: () => setNewVisit(true),
     evi: (o = {}) => setEvi({ open: true, init: o }),
     openSearch: () => setSearchOpen(true),
+    guide: () => setGuideOpen(true),
   }), []);
 
   const onKey = useCallback((e: KeyboardEvent) => {
@@ -109,7 +113,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
         <div className="space-y-0.5 border-t border-line p-3">
           <NavLink item={{ href: "/practice/settings", label: "Settings", icon: Settings }} collapsed={collapsed} active={isActive("/practice/settings")} />
-          <button onClick={() => toast("Help center opens in a new tab in production.")} className={cn("flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[13.5px] font-medium text-slate-600 hover:bg-cloud", collapsed ? "justify-center" : "justify-start")}>
+          <button onClick={() => setGuideOpen(true)} className={cn("flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[13.5px] font-medium text-slate-600 hover:bg-cloud", collapsed ? "justify-center" : "justify-start")}>
             <HelpCircle className="size-[18px]" strokeWidth={1.8} aria-hidden /><span className={collapsed ? "sr-only" : ""}>Help</span>
           </button>
           <div className={cn("flex items-center gap-2.5 px-1 pt-2", collapsed ? "justify-center" : "justify-start")}>
@@ -167,6 +171,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <MenuTrigger asChild><button aria-label="Help" className="hidden size-10 place-items-center rounded-lg text-slate-600 hover:bg-cloud sm:grid"><HelpCircle className="size-[18px]" /></button></MenuTrigger>
               <MenuContent>
                 <MenuLabel>Help</MenuLabel>
+                <MenuItem onSelect={() => setGuideOpen(true)}>Quick guide</MenuItem>
                 <MenuItem onSelect={() => toast("Search: Ctrl K · Ask EVI: Ctrl J")}>Keyboard shortcuts</MenuItem>
                 <MenuItem onSelect={() => ui.evi({ prompt: "What needs attention today?" })}>Ask EVI for help</MenuItem>
                 <MenuItem onSelect={() => toast.success("Support request sent")}>Contact support</MenuItem>
@@ -209,6 +214,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <NewFollowUpPanel open={newFu.open} prefill={newFu.prefill} onClose={() => setNewFu({ open: false })} />
       <NewVisitDialog open={newVisit} onClose={() => setNewVisit(false)} />
       <EviDialog open={evi.open} initial={evi.init} onClose={() => setEvi((e) => ({ ...e, open: false }))} />
+      <GuidePanel open={guideOpen} onClose={() => setGuideOpen(false)} />
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
     </UICtx.Provider>
   );
