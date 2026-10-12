@@ -2,6 +2,7 @@ import {
   addDays, appointments, followUps, fmtDate, fmtTime, getPatient, getProvider, getService, nowMin, patients, pname,
   providers, TODAY, toMin, visits, fromMin,
 } from "./db";
+import { photos, inventory, invStatus, patientFinancials, money, type PermKey } from "./clinical";
 
 /* ---------------- Shared helpers ---------------- */
 export const waitingNow = () =>
@@ -30,7 +31,7 @@ export function prepSummary(patientId: string, apptId?: string) {
     treatments: past.flatMap((v) => v.treatments.map((t) => `${fmtDate(v.date)}: ${t.product}, ${t.units} units — ${t.area}`)).slice(0, 4),
     notes: last ? [last.notes.subjective, last.notes.plan].filter(Boolean) : [],
     forms: [...new Set(past.flatMap((v) => v.forms).map((f) => `${f.name} (${f.signed ? "signed" : "unsigned"})`))].slice(0, 3),
-    photos: past.reduce((n, v) => n + v.photos.length, 0),
+    photos: photos.filter((x) => x.patientId === patientId).length,
     plot: withPlot ? { visitId: withPlot.id, date: withPlot.date, points: withPlot.plot.length } : undefined,
     followUps: fus.slice(0, 3).map((f) => `${f.type} · due ${fmtDate(f.due)} · ${f.status}`),
     lastVisitId: last?.id,
@@ -137,15 +138,16 @@ export const agents: AgentDef[] = [
 
 /* ---------------- EVI ---------------- */
 export interface EviRow { title: string; meta?: string; right?: string; href?: string; apptId?: string; patientId?: string }
-export interface EviAnswer { text: string; rows?: EviRow[]; links?: { label: string; href?: string; startAppt?: string; prep?: { patientId: string; apptId?: string } }[]; prep?: PrepSummary }
+export interface EviAnswer { source?: string; kind?: "facts" | "summary"; text: string; rows?: EviRow[]; links?: { label: string; href?: string; startAppt?: string; prep?: { patientId: string; apptId?: string } }[]; prep?: PrepSummary }
 
 export const EVI_SUGGESTIONS = ["Who is waiting now?", "What needs attention today?", "Show today's follow-ups", "Prepare my next visit"];
 
 const apptRow = (a: (typeof appointments)[number], right?: string): EviRow => ({ title: pname(a.patientId), meta: `${fmtTime(a.time)} · ${getService(a.serviceId)?.name} · ${getProvider(a.providerId)?.short}`, right, patientId: a.patientId, apptId: a.id });
 
-export function askEvi(q: string): EviAnswer {
+export interface EviCtx { can?: (p: PermKey) => boolean; patientId?: string }
+export function askEvi(q: string, ctx: EviCtx = {}): EviAnswer {
   const s = q.toLowerCase();
-  const patient = patients.find((p) => s.includes(`${p.first} ${p.last}`.toLowerCase()) || s.includes(p.first.toLowerCase()) || s.includes(p.last.toLowerCase()));
+  const patient = patients.find((p) => p.id === ctx.patientId && /(he|she|they|this patient|their|his|her)|recent visits|history|summari|prepare/.test(s)) ?? patients.find((p) => s.includes(`${p.first} ${p.last}`.toLowerCase()) || s.includes(p.first.toLowerCase()) || s.includes(p.last.toLowerCase()));
   const provider = providers.find((p) => s.includes(p.short.toLowerCase()) || s.includes(p.short.replace("Dr. ", "dr ").toLowerCase()) || s.includes(p.name.split(" ").pop()!.toLowerCase()));
   const todays = appointments.filter((a) => a.date === TODAY);
 
@@ -157,12 +159,23 @@ export function askEvi(q: string): EviAnswer {
     } else apptId = todays.find((a) => a.patientId === pid && !["completed", "cancelled", "no_show"].includes(a.status))?.id;
     if (!pid) return { text: "You have no upcoming visits to prepare today." };
     const prep = prepSummary(pid, apptId);
-    return { text: `Here is the documented history for ${prep.name}. This is a summary of existing records only.`, prep, links: [{ label: "Open patient", href: `/patients/${pid}` }, ...(apptId ? [{ label: "Start visit", startAppt: apptId }] : [])] };
+    return { kind: "summary", source: "Visits, notes, forms, photos and plots on file", text: `Here is the documented history for ${prep.name}. This is a summary of existing records only.`, prep, links: [{ label: "Open patient", href: `/patients/${pid}` }, ...(apptId ? [{ label: "Start visit", startAppt: apptId }] : [])] };
+  }
+  if (/low stock|inventory|running low|reorder|out of stock/.test(s)) {
+    if (ctx.can && !ctx.can("inventory")) return { text: "Your role doesn't include inventory access, so I can't show stock levels.", source: "Permissions" };
+    const low = inventory.filter((i) => ["Low", "Out"].includes(invStatus(i)));
+    return { kind: "facts", source: "Inventory records", text: low.length ? `${low.length} item${low.length > 1 ? "s are" : " is"} at or below the reorder level.` : "No items are below their reorder level.", rows: low.map((i) => ({ title: i.name, meta: `${i.qty} ${i.unit} in stock · reorder at ${i.reorder}`, right: invStatus(i), href: "/practice/inventory" })), links: [{ label: "Open inventory", href: "/practice/inventory" }] };
+  }
+  if (/balance|owes|outstanding|unpaid|invoice/.test(s)) {
+    if (ctx.can && !ctx.can("financials")) return { text: "Your role doesn't include financial information, so I can't answer that.", source: "Permissions" };
+    const t = patients.map((p) => ({ p, f: patientFinancials(p.id) })).filter((x) => x.f.outstanding > 0).sort((a, b) => b.f.outstanding - a.f.outstanding);
+    if (patient) { const f = patientFinancials(patient.id); return { kind: "facts", source: "Invoices and payments", text: `${patient.first} ${patient.last} has an outstanding balance of ${money(f.outstanding)} across ${f.unpaid} unpaid invoice${f.unpaid === 1 ? "" : "s"}.`, links: [{ label: "Open financials", href: `/patients/${patient.id}?tab=financials` }] }; }
+    return { kind: "facts", source: "Invoices and payments", text: `${t.length} patients have an outstanding balance.`, rows: t.map(({ p, f }) => ({ title: `${p.first} ${p.last}`, meta: `${f.unpaid} unpaid invoice${f.unpaid === 1 ? "" : "s"}`, right: money(f.outstanding), patientId: p.id })) };
   }
   if (/wait/.test(s)) {
     const w = waitingNow();
     if (!w.length) return { text: "No patients are waiting right now." };
-    return { text: `${w.length} patient${w.length > 1 ? "s are" : " is"} currently waiting.`, rows: w.map(({ a, mins }) => apptRow(a, `${mins} min`)), links: [{ label: "View waiting room", href: "/front-desk" }] };
+    return { kind: "facts", source: "Today's appointments", text: `${w.length} patient${w.length > 1 ? "s are" : " is"} currently waiting.`, rows: w.map(({ a, mins }) => apptRow(a, `${mins} min`)), links: [{ label: "View waiting room", href: "/overview?view=flow" }] };
   }
   if (/left today|remaining|rest of (the|my) day|have left/.test(s) || (provider && /today|schedule|left/.test(s))) {
     const pv = provider ?? providers[0];
@@ -184,14 +197,14 @@ export function askEvi(q: string): EviAnswer {
   if (/follow.?up/.test(s)) {
     const b = followUpBuckets();
     const rows = [...b.overdue.map((f) => ({ f, r: "Overdue" })), ...b.today.map((f) => ({ f, r: "Due today" }))].map(({ f, r }): EviRow => ({ title: pname(f.patientId), meta: `${f.type} · ${f.assignee}`, right: r, patientId: f.patientId }));
-    return { text: `${b.today.length} follow-ups are due today and ${b.overdue.length} are overdue.`, rows, links: [{ label: "Review follow-ups", href: "/follow-ups" }, { label: "Follow-up Agent", href: "/agents?agent=followup" }] };
+    return { kind: "facts", source: "Follow-up tasks", text: `${b.today.length} follow-ups are due today and ${b.overdue.length} are overdue.`, rows, links: [{ label: "Review follow-ups", href: "/follow-ups" }, { label: "Follow-up Agent", href: "/agents?agent=followup" }] };
   }
   if (/attention|need|priority|today/.test(s)) {
     const w = waitingNow(); const b = followUpBuckets(); const g = scheduleGaps();
     return {
       text: "Here is what needs attention in the practice today.",
       rows: [
-        { title: `${w.length} patients waiting`, meta: w.map(({ a, mins }) => `${pname(a.patientId).split(" ")[0]} ${mins}m`).join(" · "), href: "/front-desk" },
+        { title: `${w.length} patients waiting`, meta: w.map(({ a, mins }) => `${pname(a.patientId).split(" ")[0]} ${mins}m`).join(" · "), href: "/overview?view=flow" },
         { title: `${b.overdue.length} overdue follow-ups`, meta: `${b.today.length} more due today`, href: "/follow-ups" },
         { title: `${g.length} schedule gaps`, meta: "45 minutes or longer", href: "/calendar" },
         { title: `${noShows().length} no-show, ${todays.filter((a) => a.status === "cancelled").length} cancellation`, meta: "Consider rebooking", href: "/agents?agent=noshow" },

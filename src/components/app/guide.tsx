@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, Circle, X } from "lucide-react";
 import { Button, Sheet } from "@/components/ui";
 import { useAppointments, usePatients, useVisits } from "@/lib/hooks";
+import { useSettings } from "@/lib/settings";
 import { TODAY } from "@/lib/db";
 import { cn } from "@/lib/utils";
 import { useUI } from "./ui-state";
@@ -14,12 +15,12 @@ interface Step { t: string; d: string; sprite?: number; href?: string; go?: stri
 const STEPS: Step[] = [
   { t: "Hi, I'm EVI", d: "I'll show you around in seven short steps. You can leave any time and reopen this from Help." },
   { t: "Run the day", d: "Overview shows today's schedule and who is waiting. In Calendar, click an appointment for details or an empty slot to book.", sprite: 1, href: "/calendar", go: "Open calendar" },
-  { t: "Move patients through the visit", d: "Front desk: check in, move to waiting, start the visit, then complete it. Actions change with each status.", sprite: 0, href: "/front-desk", go: "Open front desk" },
+  { t: "Move patients through the visit", d: "Front desk: check in, move to waiting, start the visit, then complete it. Actions change with each status.", sprite: 0, href: "/overview?view=flow", go: "Open front desk" },
   { t: "Find anything fast", d: "Ctrl K searches patients, appointments and visits. Ctrl J or Ask EVI answers questions such as “Who is waiting?”. Use + New to add patients, appointments and follow-ups.", search: true },
   { t: "Document a visit", d: "Visits has tabs for notes, treatment, forms, photos and follow-up. Injection plotting records where treatment was given.", sprite: 3, href: "/visits", go: "Open visits" },
   { t: "Keep follow-ups moving", d: "Follow-ups lists what is due, overdue and upcoming. Complete one or schedule the next appointment from the same row.", sprite: 2, href: "/follow-ups", go: "Open follow-ups" },
   { t: "Let agents help", d: "Six agents review the schedule, follow-ups, recalls, no-shows and visit history. They summarize documented information only. They never diagnose or recommend treatment.", sprite: 5, href: "/agents", go: "Open AI agents" },
-  { t: "Set up your practice", d: "Providers, services, locations and rooms live under Practice in the sidebar. That's the tour. I'm in Ask EVI whenever you need me.", href: "/practice/providers", go: "Open providers" },
+  { t: "Set up your practice", d: "Providers, services, locations and rooms live under Practice in the sidebar. That's the tour. I'm in Ask EVI whenever you need me.", href: "/practice/team", go: "Open providers" },
 ];
 
 export function GuidePanel({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -62,6 +63,7 @@ export function GettingStarted() {
   const { data: appts } = useAppointments();
   const { data: visits } = useVisits();
   const ui = useUI();
+  const st = useSettings();
   const [hidden, setHidden] = useState(true);
   const [evi, setEvi] = useState(false);
   useEffect(() => {
@@ -74,10 +76,12 @@ export function GettingStarted() {
   const items = [
     { k: "patient", l: "Add a patient", done: patients.length > 12, run: ui.newPatient },
     { k: "appt", l: "Book an appointment", done: appts.length > 23, run: () => ui.newAppt() },
-    { k: "checkin", l: "Check a patient in", done: appts.filter((a) => a.date === TODAY && ["arrived", "waiting", "in_progress", "completed"].includes(a.status)).length > 8, href: "/front-desk" },
-    { k: "visit", l: "Complete a visit", done: visits.filter((v) => v.date === TODAY && v.status === "Completed").length > 3, href: "/front-desk" },
+    { k: "checkin", l: "Check a patient in", done: appts.filter((a) => a.date === TODAY && ["arrived", "waiting", "in_progress", "completed"].includes(a.status)).length > 8, href: "/overview?view=flow" },
+    { k: "visit", l: "Complete a visit", done: visits.filter((v) => v.date === TODAY && v.status === "Completed").length > 3, href: "/overview?view=flow" },
     { k: "evi", l: "Ask EVI a question", done: evi, run: () => ui.evi() },
   ];
+  if (st.setupPending.includes("provider")) items.unshift({ k: "prov", l: "Add a provider", done: false, href: "/practice/team" } as (typeof items)[number]);
+  if (st.setupPending.includes("services")) items.unshift({ k: "svc", l: "Add services", done: false, href: "/practice/services" } as (typeof items)[number]);
   const n = items.filter((i) => i.done).length;
   const dismiss = () => { try { localStorage.setItem(FLAG + ".hidden", "1"); } catch {} setHidden(true); };
 
@@ -91,7 +95,7 @@ export function GettingStarted() {
         </div>
       </div>
       <div className="mt-3 h-1.5 rounded-full bg-cloud" role="progressbar" aria-valuenow={n} aria-valuemax={items.length} aria-label="Getting started progress"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${(n / items.length) * 100}%` }} /></div>
-      <ul className="mt-3 grid gap-x-6 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-5">
+      <ul className="mt-3 grid gap-x-6 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-4">
         {items.map((i) => (
           <li key={i.k} className="flex items-center gap-2 text-[13px]">
             {i.done ? <Check className="size-4 shrink-0 text-[#2A8577]" aria-label="Done" /> : <Circle className="size-3.5 shrink-0 text-slate-300" aria-hidden />}

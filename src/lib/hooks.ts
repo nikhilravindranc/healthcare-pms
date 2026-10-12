@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, nowMin } from "./db";
+import { apiC, loadClinic, loadRole, ROLE_PERMS, CLINIC_CONFIG, type ClinicType, type PermKey, type Role } from "./clinical";
 
 export const useRefs = () => useQuery({ queryKey: ["refs"], queryFn: api.refs, staleTime: Infinity });
 export const usePatients = () => useQuery({ queryKey: ["patients"], queryFn: api.patients });
@@ -34,3 +35,21 @@ export function useNow() {
   }, []);
   return n;
 }
+
+export const usePhotos = () => useQuery({ queryKey: ["photos"], queryFn: apiC.photos });
+export const useBilling = () => useQuery({ queryKey: ["billing"], queryFn: apiC.invoices });
+export const useInventory = () => useQuery({ queryKey: ["inventory"], queryFn: apiC.inventory });
+export const useTemplates = () => useQuery({ queryKey: ["templates"], queryFn: apiC.templates });
+export const useAudit = () => useQuery({ queryKey: ["audit"], queryFn: apiC.audit });
+
+const sub = (cb: () => void) => { window.addEventListener("pms-clinic", cb); return () => window.removeEventListener("pms-clinic", cb); };
+export function useClinic() {
+  const type = useSyncExternalStore(sub, () => loadClinic(), () => "Medical aesthetics" as ClinicType);
+  return { type, config: CLINIC_CONFIG[type] };
+}
+export function useRole() {
+  const role = useSyncExternalStore(sub, () => loadRole(), () => "Owner" as Role);
+  return { role, can: (p: PermKey) => ROLE_PERMS[role].includes(p) };
+}
+export const useExtras = () => useQuery({ queryKey: ["extras"], queryFn: apiC.extras });
+export const useAiActivity = () => useQuery({ queryKey: ["ai"], queryFn: apiC.ai });

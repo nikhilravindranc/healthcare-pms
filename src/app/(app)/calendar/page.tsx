@@ -1,12 +1,13 @@
 "use client";
 import { useMemo, useState } from "react";
-import { CalendarPlus, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarPlus, ChevronLeft, ChevronRight, SlidersHorizontal } from "lucide-react";
 import { Button, Segmented, Select, Skeleton, StatusDot, STATUS } from "@/components/ui";
 import { AgentHint } from "@/components/app/bits";
 import { useUI } from "@/components/app/ui-state";
 import { useAppointments, useNow, useRefs } from "@/lib/hooks";
 import { addDays, fmtDate, fmtTime, fromMin, getPatient, TODAY, toMin } from "@/lib/db";
 import { scheduleGaps } from "@/lib/insight";
+import { PatientAvatar } from "@/components/app/photos";
 import type { Appointment } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
@@ -14,6 +15,8 @@ import { useRouter } from "next/navigation";
 const H0 = 8, H1 = 18, PX = 1.5; // hour range and pixels per minute
 type View = "day" | "week" | "month";
 
+const t12 = (x: string) => { const m = x.match(/(\d+):(\d+) ([AP]M)/); if (!m) return 0; return ((Number(m[1]) % 12) + (m[3] === "PM" ? 12 : 0)) * 60 + Number(m[2]); };
+const parseHours = (h?: string): [number, number] | null => { const m = h?.match(/(\d+:\d+ [AP]M)\s*[–-]\s*(\d+:\d+ [AP]M)/); return m ? [t12(m[1]), t12(m[2])] : null; };
 const monday = (d: string) => { const x = new Date(d + "T12:00:00"); const k = (x.getDay() + 6) % 7; return addDays(d, -k); };
 const longDate = (d: string) => new Date(d + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 
@@ -29,6 +32,8 @@ export default function CalendarPage() {
   const [date, setDate] = useState(TODAY);
   const [f, setF] = useState({ provider: "", service: "", location: "", room: "" });
   const [gaps, setGaps] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const active = [f.provider, f.service, f.location, f.room].filter(Boolean).length;
 
   const filtered = useMemo(() => (appts ?? []).filter((a) =>
     (!f.provider || a.providerId === f.provider) && (!f.service || a.serviceId === f.service) && (!f.location || a.locationId === f.location) && (!f.room || a.roomId === f.room)), [appts, f]);
@@ -59,16 +64,17 @@ export default function CalendarPage() {
         <p className="text-[15px] font-medium" aria-live="polite">{title}</p>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Segmented label="Calendar view" value={view} onChange={setView} options={[{ value: "day", label: "Day" }, { value: "week", label: "Week" }, { value: "month", label: "Month" }]} />
+          <Button size="sm" variant={showFilters || active ? "soft" : "secondary"} aria-pressed={showFilters} onClick={() => setShowFilters((v) => !v)}><SlidersHorizontal className="size-4" />Filters{active ? ` (${active})` : ""}</Button>
           <Button size="sm" onClick={() => ui.newAppt({ date })}><CalendarPlus className="size-4" />New appointment</Button>
         </div>
       </div>
-      <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Calendar filters">
+      {showFilters && <div className="anim-fade mb-4 flex flex-wrap gap-2 rounded-xl border border-line bg-cloud/40 p-2.5" role="group" aria-label="Calendar filters">
         <Select sm aria-label="Provider" className="w-40" value={f.provider} onChange={(e) => setF({ ...f, provider: e.target.value })}><option value="">All providers</option>{refs?.providers.map((p) => <option key={p.id} value={p.id}>{p.short}</option>)}</Select>
         <Select sm aria-label="Service" className="w-48" value={f.service} onChange={(e) => setF({ ...f, service: e.target.value })}><option value="">All services</option>{refs?.services.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
         <Select sm aria-label="Location" className="w-48" value={f.location} onChange={(e) => setF({ ...f, location: e.target.value, room: "" })}><option value="">All locations</option>{refs?.locations.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
         <Select sm aria-label="Room" className="w-44" value={f.room} onChange={(e) => setF({ ...f, room: e.target.value })}><option value="">All rooms</option>{refs?.rooms.filter((r) => !f.location || r.locationId === f.location).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
         {(f.provider || f.service || f.location || f.room) && <Button size="sm" variant="ghost" onClick={() => setF({ provider: "", service: "", location: "", room: "" })}>Clear filters</Button>}
-      </div>
+      </div>}
 
       {view === "day" && date === TODAY && gapCount > 0 && (
         <AgentHint agent={1} text={`Appointment Agent found ${gapCount} schedule gaps today.`} action={gaps ? "Hide gaps" : "Review gaps"} onAction={() => setGaps((g) => !g)} />
@@ -108,6 +114,9 @@ function TimeGrid({ cols, now, showNow, gaps, onOpen, onSlot, view, onDay }: { c
           <div key={c.key} className="relative border-l border-line" style={{ height }}
             onClick={(e) => { if (e.target !== e.currentTarget) return; const y = e.nativeEvent.offsetY; const m = H0 * 60 + Math.floor(y / PX / 15) * 15; onSlot(c, fromMin(m)); }}>
             {hours.map((h) => <div key={h} className="pointer-events-none absolute inset-x-0 border-t border-line/70" style={{ top: (h - H0) * 60 * PX }} />)}
+            {c.providerId && (() => { const hrs = parseHours(refs?.providers.find((x) => x.id === c.providerId)?.hours); if (!hrs) return null; return (<>
+              {hrs[0] > H0 * 60 && <div className="pointer-events-none absolute inset-x-0 top-0 bg-[repeating-linear-gradient(135deg,#F2F4F6_0_6px,#fff_6px_12px)]" style={{ height: (hrs[0] - H0 * 60) * PX }} title="Unavailable: outside provider hours" />}
+              {hrs[1] < H1 * 60 && <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-[repeating-linear-gradient(135deg,#F2F4F6_0_6px,#fff_6px_12px)]" style={{ height: (H1 * 60 - hrs[1]) * PX }} title="Unavailable: outside provider hours" />}</>); })()}
             {gaps && c.providerId && gapList.filter((g) => g.providerId === c.providerId).map((g) => (
               <button key={g.from} onClick={() => onSlot(c, g.from)} className="absolute inset-x-1 rounded-md border border-dashed border-primary/50 bg-active/70 text-[11px] font-medium text-primary hover:bg-active"
                 style={{ top: (toMin(g.from) - H0 * 60) * PX + 1, height: g.mins * PX - 2 }}>Open · {g.mins} min</button>
@@ -122,7 +131,7 @@ function TimeGrid({ cols, now, showNow, gaps, onOpen, onSlot, view, onDay }: { c
                 <button key={a.id} onClick={() => onOpen(a.id)} aria-label={`${p?.first} ${p?.last}, ${fmtTime(a.time)}, ${STATUS[a.status].label}`}
                   className={cn("absolute inset-x-1 overflow-hidden rounded-md border bg-white px-2 py-1 text-left shadow-[0_1px_0_rgba(38,56,75,.04)] transition hover:shadow-md focus-visible:z-10", inactive && "bg-cloud/70 opacity-70")}
                   style={{ top: top + 1, height: h, borderColor: "#E2E7EB", borderLeft: `3px solid ${prov?.color ?? "#2867B2"}` }}>
-                  <span className="flex items-center gap-1.5"><StatusDot status={a.status} /><span className={cn("truncate text-[12.5px] font-medium", inactive && "line-through")}>{view === "week" ? `${fmtTime(a.time).replace(" ", "")} ` : ""}{p?.first} {p?.last}</span></span>
+                  <span className="flex items-center gap-1.5">{h >= 40 && view === "day" && <PatientAvatar id={a.patientId} size={18} />}<StatusDot status={a.status} /><span className={cn("truncate text-[12.5px] font-medium", inactive && "line-through")}>{view === "week" ? `${fmtTime(a.time).replace(" ", "")} ` : ""}{p?.first} {p?.last}</span></span>
                   {h >= 40 && <span className="mt-0.5 block truncate text-[11.5px] text-muted">{refs?.services.find((s) => s.id === a.serviceId)?.name}</span>}
                   {h >= 58 && <span className="block truncate text-[11px] text-muted">{STATUS[a.status].label}{view === "week" ? ` · ${prov?.short}` : ""}</span>}
                 </button>

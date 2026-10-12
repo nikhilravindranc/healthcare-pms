@@ -1,10 +1,13 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Download } from "lucide-react";
 import { toast } from "sonner";
-import { Button, PageHeader, Panel, PanelHeader, Select, Skeleton, Td, Th } from "@/components/ui";
+import { Badge, Button, PageHeader, Panel, PanelHeader, Select, Skeleton, Td, Th } from "@/components/ui";
 import { AgentHint } from "@/components/app/bits";
-import { useRefs } from "@/lib/hooks";
+import { Denied } from "@/components/patient/shared";
+import { useBilling, useInventory, useRefs, useRole } from "@/lib/hooks";
+import { docTotal, invoiceBalance, invoicePaid, invStatus, money } from "@/lib/clinical";
 import { addDays, fmtDate, TODAY } from "@/lib/db";
 
 /** Deterministic demo data so the same filters always give the same numbers. */
@@ -15,6 +18,9 @@ const LOC_SHARE: Record<string, number> = { dt: 0.62, ws: 0.38 };
 
 export default function ReportsPage() {
   const { data: refs } = useRefs();
+  const { can } = useRole();
+  const { data: bill } = useBilling();
+  const { data: inv } = useInventory();
   const [f, setF] = useState({ range: "30", provider: "", service: "", location: "" });
   const [busy, setBusy] = useState(true);
   useEffect(() => { const t = setTimeout(() => setBusy(false), 450); return () => clearTimeout(t); }, []);
@@ -48,9 +54,10 @@ export default function ReportsPage() {
     toast.success("Report exported");
   };
 
+  if (!can("reports")) return <Denied what="reports" />;
   return (
     <>
-      <PageHeader title="Reports" subtitle="Operational performance of the practice" actions={<Button variant="secondary" onClick={exportCsv}><Download className="size-4" />Export</Button>} />
+      <PageHeader title="Reports" subtitle="Operational performance of the practice" actions={<><Link href="/agents"><Button variant="ghost">Agents</Button></Link><Button variant="secondary" onClick={exportCsv}><Download className="size-4" />Export</Button></>} />
       <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Report filters">
         <Select sm className="w-40" aria-label="Date range" value={f.range} onChange={(e) => setF({ ...f, range: e.target.value })}><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></Select>
         <Select sm className="w-40" aria-label="Provider" value={f.provider} onChange={(e) => setF({ ...f, provider: e.target.value })}><option value="">All providers</option>{refs?.providers.map((p) => <option key={p.id} value={p.id}>{p.short}</option>)}</Select>
@@ -84,6 +91,14 @@ export default function ReportsPage() {
             <Panel className="lg:col-span-2"><PanelHeader title="Patient activity" />
               <dl className="grid grid-cols-3 divide-x divide-line text-center">{[["New patients", d.newP], ["Returning visits", d.ret], ["Follow-ups completed", `${d.fu}%`]].map(([l, n]) => <div key={l} className="px-4 py-4"><dd className="text-xl font-semibold">{n}</dd><dt className="text-xs text-muted">{l}</dt></div>)}</dl></Panel>
           </div>
+          {can("financials") && bill && (
+            <Panel className="mt-5"><PanelHeader title="Billing summary" sub="Invoices, collections, refunds and discounts across all patients" />
+              <dl className="grid grid-cols-2 divide-x divide-y divide-line sm:grid-cols-5 sm:divide-y-0">{[["Invoices", String(bill.invoices.filter((i) => i.status !== "Void").length)], ["Invoiced", money(bill.invoices.filter((i) => i.status !== "Void").reduce((s, i) => s + docTotal(i), 0))], ["Collected", money(bill.invoices.reduce((s, i) => s + invoicePaid(i.id), 0))], ["Outstanding", money(bill.invoices.reduce((s, i) => s + invoiceBalance(i), 0))], ["Refunds", money(bill.payments.filter((p) => p.kind === "refund" && p.status === "Posted").reduce((s, p) => s + p.amount, 0))]].map(([l, n]) => <div key={l} className="px-4 py-3"><dd className="text-[16px] font-semibold">{n}</dd><dt className="text-xs text-muted">{l}</dt></div>)}</dl>
+              <p className="border-t border-line px-4 py-2 text-xs text-muted">Discounts given: {money(bill.invoices.reduce((s, i) => s + i.lines.reduce((t, l) => t + l.qty * l.unit * (l.discount / 100), 0), 0))}. Based on posted records; not a substitute for accounting reports.</p></Panel>)}
+          {can("inventory") && inv && (
+            <Panel className="mt-5"><PanelHeader title="Inventory" sub="Stock status and usage recorded from completed visits" />
+              <ul className="divide-y divide-line">{inv.inventory.map((i) => { const used = inv.moves.filter((m) => m.itemId === i.id && m.delta < 0).reduce((s, m) => s + -m.delta, 0); return <li key={i.id} className="flex items-center justify-between px-4 py-2.5 text-[13px]"><span className="font-medium">{i.name}</span><span className="text-muted">{i.qty} {i.unit} in stock · {used} {i.unit} used</span><Badge tone={invStatus(i) === "Active" ? "mint" : invStatus(i) === "Low" ? "peach" : "red"}>{invStatus(i)}</Badge></li>; })}</ul></Panel>)}
+          <p className="mt-4 text-xs text-muted">Appointment charts are illustrative demo data generated from your filters. Billing and inventory figures come from live records. Data as of Oct 7, 2026, 10:20 AM.</p>
         </>
       )}
     </>

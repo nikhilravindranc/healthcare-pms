@@ -6,12 +6,15 @@ import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Badge, Button } from "@/components/ui";
 import { api, pname } from "@/lib/db";
-import { useAction } from "@/lib/hooks";
+import { useAction, useRole } from "@/lib/hooks";
+import { useUI } from "./ui-state";
 import type { Appointment, Patient } from "@/lib/types";
 
 /** Status-driven primary action for an appointment row (front desk / overview). */
 export function ApptActions({ a, compact }: { a: Appointment; compact?: boolean }) {
   const router = useRouter();
+  const ui = useUI();
+  const { can } = useRole();
   const status = useAction(api.setStatus);
   const start = useAction(api.startVisit);
   const name = pname(a.patientId);
@@ -31,8 +34,14 @@ export function ApptActions({ a, compact }: { a: Appointment; compact?: boolean 
         </div>
       );
     case "in_progress":
-    case "completed":
       return a.visitId ? <Button size={sz} variant="secondary" onClick={() => router.push(`/visits/${a.visitId}`)}>View visit</Button> : null;
+    case "completed":
+      return (
+        <div className="flex gap-1.5">
+          {a.visitId && <Button size={sz} variant="secondary" onClick={() => router.push(`/visits/${a.visitId}`)}>View visit</Button>}
+          {can("financials") && !compact && <Button size={sz} variant="soft" onClick={() => ui.checkout(a.id)}>Checkout</Button>}
+        </div>
+      );
     default:
       return <span className="text-xs text-muted">—</span>;
   }

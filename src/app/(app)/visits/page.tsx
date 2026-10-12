@@ -20,7 +20,7 @@ export default function VisitsPage() {
 
   return (
     <>
-      <PageHeader title="Visits" subtitle="Clinical documentation for each patient visit" actions={<Button onClick={ui.newVisit}><Plus className="size-4" />New visit</Button>} />
+      <PageHeader title="Visits" subtitle="Clinical documentation for each patient visit" actions={<Button onClick={() => ui.newVisit()}><Plus className="size-4" />New visit</Button>} />
       <Panel>
         <div className="flex flex-wrap items-center gap-3 border-b border-line p-3">
           <Segmented label="Visit filter" value={tab} onChange={setTab} options={[{ value: "all", label: "All" }, { value: "progress", label: "In progress" }, { value: "today", label: "Today" }, { value: "completed", label: "Completed" }]} />

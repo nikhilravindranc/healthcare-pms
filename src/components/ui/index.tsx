@@ -42,8 +42,8 @@ const control = "w-full rounded-lg border bg-white px-3 text-sm text-ink placeho
 export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }>(function Input({ className, invalid, ...p }, ref) {
   return <input ref={ref} aria-invalid={invalid || undefined} className={cn(control, "h-10", invalid ? "border-danger" : "border-line", className)} {...p} />;
 });
-export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea({ className, ...p }, ref) {
-  return <textarea ref={ref} className={cn(control, "border-line py-2 min-h-20", className)} {...p} />;
+export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement> & { invalid?: boolean }>(function Textarea({ className, invalid, ...p }, ref) {
+  return <textarea ref={ref} aria-invalid={invalid || undefined} className={cn(control, "py-2 min-h-20", invalid ? "border-danger" : "border-line", className)} {...p} />;
 });
 export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement> & { invalid?: boolean; sm?: boolean }>(function Select({ className, invalid, sm, children, ...p }, ref) {
   return (

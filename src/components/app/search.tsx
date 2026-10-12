@@ -3,10 +3,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog } from "radix-ui";
 import { Search as SearchIcon, Clock } from "lucide-react";
-import { fmtDate, fmtTime, getPatient, getProvider, getService, pname, search, visits as allVisits } from "@/lib/db";
+import { fmtDate, fmtTime, getProvider, getService, pname, search, visits as allVisits } from "@/lib/db";
 import { useUI } from "./ui-state";
+import { PatientAvatar } from "./photos";
 
-interface Item { key: string; group: string; title: string; sub: string; run: () => void }
+interface Item { key: string; group: string; title: string; sub: string; run: () => void; avatar?: string }
 
 export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router = useRouter();
@@ -21,10 +22,11 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
     const go = (href: string) => () => { remember(); onClose(); router.push(href); };
     const remember = () => { const n = [q, ...recent.filter((x) => x !== q)].slice(0, 4); try { localStorage.setItem("pms.recent", JSON.stringify(n)); } catch {} };
     return [
-      ...r.patients.map((p): Item => ({ key: p.id, group: "Patients", title: `${p.first} ${p.last}`, sub: `Patient ID: ${p.id}`, run: go(`/patients/${p.id}`) })),
-      ...r.appointments.map((a): Item => ({ key: a.id, group: "Appointments", title: pname(a.patientId), sub: `Today · ${fmtTime(a.time)} · ${getService(a.serviceId)?.name} · ${getProvider(a.providerId)?.short}`, run: () => { remember(); onClose(); ui.openAppt(a.id); } })),
-      ...r.visits.map((v): Item => ({ key: v.id, group: "Visits", title: pname(v.patientId), sub: `${fmtDate(v.date)} · ${v.type}`, run: go(`/visits/${v.id}`) })),
-      ...r.providers.map((p): Item => ({ key: p.id, group: "Providers", title: p.name, sub: p.specialty, run: go("/practice/providers") })),
+      ...r.patients.map((p): Item => ({ key: p.id, group: "Patients", title: `${p.first} ${p.last}`, sub: `Patient ID: ${p.id}`, avatar: p.id, run: go(`/patients/${p.id}`) })),
+      ...r.appointments.map((a): Item => ({ key: a.id, group: "Appointments", title: pname(a.patientId), avatar: a.patientId, sub: `Today · ${fmtTime(a.time)} · ${getService(a.serviceId)?.name} · ${getProvider(a.providerId)?.short}`, run: () => { remember(); onClose(); ui.openAppt(a.id); } })),
+      ...r.visits.map((v): Item => ({ key: v.id, group: "Visits", title: pname(v.patientId), avatar: v.patientId, sub: `${fmtDate(v.date)} · ${v.type}`, run: go(`/visits/${v.id}`) })),
+      ...(/plot|inject/.test(q.toLowerCase()) ? allVisits.filter((v) => v.plot.length > 0).slice(0, 4).map((v): Item => ({ key: v.id + "plot", group: "Injection plots", title: pname(v.patientId), avatar: v.patientId, sub: `${fmtDate(v.date)} · ${v.plot.length} points`, run: go(`/visits/${v.id}?tab=plotting`) })) : []),
+      ...r.providers.map((p): Item => ({ key: p.id, group: "Providers", title: p.name, sub: p.specialty, run: go("/practice/team") })),
       ...r.services.map((s): Item => ({ key: s.id, group: "Services", title: s.name, sub: `${s.category} · ${s.duration} min`, run: go("/practice/services") })),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -32,7 +34,6 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
   useEffect(() => setIdx(0), [q]);
 
   const groups = [...new Set(items.map((i) => i.group))];
-  void allVisits; void getPatient;
   return (
     <Dialog.Root open={open} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
@@ -66,8 +67,8 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
                   const n = items.indexOf(i);
                   return (
                     <button key={i.key + g} role="option" aria-selected={n === idx} onMouseEnter={() => setIdx(n)} onClick={i.run}
-                      className={`flex w-full flex-col rounded-md px-2.5 py-2 text-left ${n === idx ? "bg-active" : ""}`}>
-                      <span className="text-sm font-medium">{i.title}</span><span className="text-xs text-muted">{i.sub}</span>
+                      className={`flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left ${n === idx ? "bg-active" : ""}`}>
+                      {i.avatar && <PatientAvatar id={i.avatar} size={32} />}<span className="min-w-0"><span className="block text-sm font-medium">{i.title}</span><span className="block text-xs text-muted">{i.sub}</span></span>
                     </button>
                   );
                 })}

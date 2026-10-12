@@ -1,173 +1,176 @@
 "use client";
-import { use, useEffect, useState } from "react";
+import { Suspense, use, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Camera, CheckCircle2, FileText, Plus, Sparkles, Trash2 } from "lucide-react";
-import { Alert, Badge, Button, ConfirmDialog, EmptyState, Field, Input, Panel, PanelHeader, Select, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@/components/ui";
+import { AlertTriangle, ArrowLeft, Check, ChevronDown, MoreHorizontal, Sparkles, X } from "lucide-react";
+import { Badge, Button, ConfirmDialog, EmptyState, Field, Input, Menu, MenuContent, MenuItem, MenuTrigger, Modal, Skeleton } from "@/components/ui";
+import { PatientAvatar } from "@/components/app/photos";
 import { useUI } from "@/components/app/ui-state";
-import { useAction, useAppointments, useFollowUps, useRefs, useVisits } from "@/lib/hooks";
-import { api, fmtDate, getPatient, pname, TODAY } from "@/lib/db";
-import type { TreatmentLine, Visit } from "@/lib/types";
-import { PlotSummary } from "@/components/app/plot";
+import { Denied, ageOf } from "@/components/patient/shared";
+import { PlottingTab } from "@/components/visit/plotting";
+import { BeforeYouStart, BillingTab, capsFor, ConsentTab, FollowUpPanel, MeasuresTab, NotesTab, PlanTab, ProductsTab, SummaryPanel, TreatmentTab, VisitPhotos, type Patch } from "@/components/visit/tabs";
+import { apiC } from "@/lib/clinical";
+import { api, fmtDate, TODAY } from "@/lib/db";
+import { useAction, useAppointments, useClinic, usePatients, usePhotos, useRefs, useRole, useVisits } from "@/lib/hooks";
+import type { Visit } from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+const FIELDS = ["reason", "notes", "technique", "areas", "treatmentNote", "treatments", "plot", "followUpInstructions", "followUpRecommended", "forms", "measures", "exercises"] as const;
+const snap = (v: Visit) => JSON.stringify(FIELDS.map((k) => v[k] ?? null));
 
 export default function VisitPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+  return <Suspense><Workspace id={use(params).id} /></Suspense>;
+}
+
+function Workspace({ id }: { id: string }) {
   const { data: visits, isLoading } = useVisits();
+  const { data: patients } = usePatients();
   const { data: refs } = useRefs();
   const { data: appts } = useAppointments();
-  const { data: fus } = useFollowUps();
+  const { data: photos } = usePhotos();
+  const { can, role } = useRole();
+  const { type: clinic, config } = useClinic();
   const ui = useUI();
   const router = useRouter();
-  const update = useAction(api.updateVisit);
-  const complete = useAction(api.completeVisit, "Visit completed");
-  const [confirm, setConfirm] = useState(false);
+  const sp = useSearchParams();
+  const saveVisit = useAction(api.updateVisit);
+  const savePlot = useAction(apiC.savePlot);
+  const complete = useAction(api.completeVisit);
+  const consume = useAction(apiC.consumeStock);
+  const [draft, setDraft] = useState<Visit | null>(null);
+  const [savedAt, setSavedAt] = useState<string | undefined>();
+  const [leave, setLeave] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const [override, setOverride] = useState({ on: false, reason: "" });
+  const [afterTab, setAfterTab] = useState<string | null>(null);
+  const base = useRef("");
 
   const v = visits?.find((x) => x.id === id);
-  const [draft, setDraft] = useState<Visit | null>(null);
-  useEffect(() => { if (v && (!draft || draft.id !== v.id)) setDraft(v); }, [v, draft]);
+  useEffect(() => { if (v && (!draft || draft.id !== v.id)) { setDraft(structuredClone(v)); base.current = snap(v); } }, [v, draft]);
+  const dirty = !!draft && !!v && v.status !== "Completed" && !complete.pending && !consume.pending && snap(draft) !== base.current;
 
-  if (isLoading || (v && !draft)) return <div className="space-y-4"><Skeleton className="h-9 w-72" /><Skeleton className="h-10 w-full" /><Skeleton className="h-72 w-full" /></div>;
-  if (!v || !draft) return <EmptyState title="Visit not found" action={<Link href="/visits"><Button variant="secondary">Back to visits</Button></Link>} />;
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    const click = (e: MouseEvent) => { const a = (e.target as Element).closest?.("a[href]") as HTMLAnchorElement | null; if (a && a.origin === location.origin && !a.href.includes(`/visits/${id}`)) { e.preventDefault(); e.stopPropagation(); setLeave(a.pathname + a.search); } };
+    window.addEventListener("beforeunload", warn); document.addEventListener("click", click, true);
+    return () => { window.removeEventListener("beforeunload", warn); document.removeEventListener("click", click, true); };
+  }, [dirty, id]);
 
-  const p = getPatient(v.patientId)!;
-  const provider = refs?.providers.find((x) => x.id === v.providerId);
+  const p = patients?.find((x) => x.id === v?.patientId);
+  const { id: serviceId, caps } = useMemo(() => (draft ? capsFor(draft, refs?.services) : { id: "consult", caps: capsFor({ type: "" } as Visit, undefined).caps }), [draft, refs]);
+  const prior = (visits ?? []).filter((x) => x.patientId === v?.patientId && x.id !== id && x.status === "Completed" && x.date <= (v?.date ?? TODAY)).sort((a, b) => b.date.localeCompare(a.date))[0];
+  const appt = appts?.find((a) => a.id === v?.apptId);
+  const physio = clinic === "Physiotherapy";
+
+  const plotCount = draft?.plot.length ?? 0;
+  const tabs = useMemo(() => {
+    const t: [string, string][] = [["summary", "Summary"]];
+    if (caps.plotting && config.tabs.plotting && can("notes")) t.push(["plotting", `Injection plotting${plotCount ? ` (${plotCount})` : ""}`]);
+    t.push(["notes", config.notesLabel === "Notes" ? "Notes" : config.notesLabel]);
+    if (!physio) t.push(["treatment", config.treatmentLabel]);
+    if (caps.products && config.tabs.products) t.push(["products", "Products"]);
+    if (config.tabs.photos && (caps.beforeAfter || caps.guided) && can("photos")) t.push(["photos", "Photos"]);
+    t.push(["consent", "Forms and consent"], ["followup", "Follow-up"]);
+    if (config.tabs.plan) t.push(["plan", "Treatment plan"]);
+    if (config.tabs.measurements) t.push(["measures", "Measures and exercises"]);
+    if (can("financials")) t.push(["billing", "Billing"]);
+    return t;
+  }, [caps, config, can, physio, plotCount]);
+  const tab = tabs.find(([k]) => k === sp.get("tab"))?.[0] ?? "summary";
+  const go = (k: string) => router.replace(`/visits/${id}?tab=${k}`, { scroll: false });
+
+  if (isLoading || (v && !draft)) return <div className="space-y-4"><Skeleton className="h-16 w-full" /><Skeleton className="h-10 w-full" /><Skeleton className="h-96 w-full" /></div>;
+  if (!v || !draft || !p) return <EmptyState title="Visit not found" action={<Link href="/visits"><Button variant="secondary">Back to visits</Button></Link>} />;
+
   const locked = v.status === "Completed";
-  const prev = (visits ?? []).filter((x) => x.patientId === v.patientId && x.id !== v.id && x.status === "Completed" && x.date <= v.date).sort((a, b) => b.date.localeCompare(a.date))[0];
-  const appt = appts?.find((a) => a.id === v.apptId);
-  const save = (patch: Partial<Visit>) => { setDraft((d) => ({ ...d!, ...patch })); return update.run(v.id, patch); };
-  const myFu = fus?.filter((f) => f.patientId === v.patientId && f.status === "Open") ?? [];
+  const patch: Patch = (x) => setDraft((d) => ({ ...d!, ...x }));
+  const mine = (photos ?? []).filter((x) => x.visitId === id);
+  const requiredViews = config.photoChecklist.length ? config.photoChecklist : [];
+  const hasNotes = Object.values(draft.notes).some((x) => x.trim());
+  const reqs = [
+    can("notes") && { label: "Clinical notes written", ok: hasNotes, tab: "notes" },
+    caps.consent && { label: "Consent signed", ok: draft.forms.some((f) => f.kind === "Consent" && f.signed), tab: "consent" },
+    caps.beforeAfter && config.tabs.photos && can("photos") && { label: "Before photo (front) captured", ok: mine.some((x) => x.stage === "Before" && x.view === "Front"), tab: "photos" },
+    caps.plotting && config.tabs.plotting && { label: "At least one injection point documented", ok: draft.plot.length > 0, tab: "plotting" },
+    caps.products && draft.plot.length > 0 && { label: "Lot recorded for every product", ok: draft.plot.every((x) => !!x.lot), tab: "plotting" },
+  ].filter(Boolean) as { label: string; ok: boolean; tab: string }[];
+  const missing = reqs.filter((r) => !r.ok);
+  const canOverride = role === "Owner" || role === "Practice manager";
+
+  const save = async (quiet = false) => {
+    const { plot, ...rest } = draft; void rest;
+    const fields = Object.fromEntries(FIELDS.filter((k) => k !== "plot").map((k) => [k, draft[k]])) as Partial<Visit>;
+    await saveVisit.run(id, { ...fields, noteMeta: { savedAt: "10:" + String(20 + ((Date.now() / 60000) | 0) % 40), by: refs?.providers.find((x) => x.id === v.providerId)?.short ?? "Provider" } });
+    if (JSON.stringify(plot) !== JSON.stringify(v.plot)) await savePlot.run(id, plot);
+    base.current = snap(draft); setSavedAt(`just now by ${refs?.providers.find((x) => x.id === v.providerId)?.short}`);
+    if (!quiet) toast.success("Draft saved");
+  };
+  const finish = async (next?: string) => {
+    if (dirty) await save(true);
+    await complete.run(id); await consume.run(id);
+    toast.success("Visit completed"); setDone(false); setOverride({ on: false, reason: "" });
+    if (next) go(next);
+  };
+  const body = () => {
+    const denied = (perm: Parameters<typeof can>[0], what: string, el: React.ReactNode) => (can(perm) ? el : <Denied what={what} />);
+    switch (tab) {
+      case "summary": return <SummaryPanel v={draft} p={p} patch={patch} locked={locked} status={reqs} onPlot={caps.plotting && config.tabs.plotting && can("notes") ? () => go("plotting") : undefined} />;
+      case "notes": return denied("notes", "clinical notes", <NotesTab v={draft} patch={patch} locked={locked} prior={prior} clinic={clinic} saved={savedAt ?? (v.noteMeta ? `${v.noteMeta.savedAt} by ${v.noteMeta.by}` : undefined)} />);
+      case "treatment": return denied("notes", "treatment records", <TreatmentTab v={draft} patch={patch} locked={locked} label={config.treatmentLabel} />);
+      case "plotting": return denied("notes", "injection plots", <PlottingTab v={v.status === "Completed" ? v : draft} plot={draft.plot} setPlot={(pl) => patch({ plot: pl })} locked={locked} visits={visits ?? []} />);
+      case "products": return <ProductsTab v={draft} />;
+      case "photos": return denied("photos", "photos", <VisitPhotos v={draft} p={p} locked={locked} required={requiredViews} />);
+      case "consent": return <ConsentTab v={draft} p={p} locked={locked} patch={patch} />;
+      case "followup": return <FollowUpPanel v={draft} p={p} patch={patch} locked={locked} />;
+      case "plan": return <PlanTab v={draft} p={p} />;
+      case "measures": return <MeasuresTab v={draft} patch={patch} locked={locked} />;
+      case "billing": return denied("financials", "billing", <BillingTab v={draft} p={p} serviceId={serviceId} />);
+      default: return null;
+    }
+  };
 
   return (
     <>
-      <nav className="mb-3 text-[13px] text-muted"><Link href="/visits" className="hover:text-primary">Visits</Link> / {pname(v.patientId)}</nav>
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex flex-wrap items-center gap-2.5"><h1 className="text-[26px] font-semibold leading-tight tracking-tight">{v.type}</h1><Badge tone={locked ? "mint" : "blue"}>{v.status}</Badge></div>
-          <p className="mt-1 text-sm text-muted"><Link href={`/patients/${p.id}`} className="font-medium text-ink hover:text-primary hover:underline">{p.first} {p.last}</Link> · {p.id} · {v.date === TODAY ? "Today" : fmtDate(v.date, true)} · {provider?.name}</p>
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <button aria-label="Back to patient" onClick={() => (dirty ? setLeave(`/patients/${p.id}`) : router.push(`/patients/${p.id}`))} className="grid size-10 shrink-0 place-items-center rounded-lg border border-line bg-white hover:bg-cloud"><ArrowLeft className="size-4" /></button>
+          <PatientAvatar id={p.id} name={`${p.first} ${p.last}`} size={46} className="rounded-xl" />
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2"><h1 className="truncate text-[22px] font-semibold tracking-tight">{draft.type}</h1><Badge tone={locked ? "mint" : "blue"}>{locked ? "Completed · read-only" : "In progress"}</Badge>{dirty && <Badge tone="peach">Unsaved</Badge>}{(p.alerts ?? []).length > 0 && <Badge tone="peach"><AlertTriangle className="size-3" aria-hidden />{p.alerts![0].description}</Badge>}</div>
+            <p className="truncate text-[13px] text-muted"><Link href={`/patients/${p.id}`} className="font-medium text-ink hover:text-primary hover:underline">{p.first} {p.last}</Link> · {p.id} · {ageOf(p.dob)} yrs · {v.date === TODAY ? "Oct 7" : fmtDate(v.date)} · {refs?.providers.find((x) => x.id === v.providerId)?.short}{appt ? ` · ${refs?.rooms.find((r) => r.id === appt.roomId)?.name}` : ""}</p>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={() => ui.evi({ prep: { patientId: p.id, apptId: v.apptId } })}><Sparkles className="size-4 text-primary" />Prepare this visit</Button>
-          {!locked && <Button onClick={() => setConfirm(true)}><CheckCircle2 className="size-4" />Complete visit</Button>}
-          {locked && <Button variant="secondary" onClick={() => router.push(`/patients/${p.id}`)}>Open patient</Button>}
+        <div className="flex flex-wrap items-center gap-2">
+          <Menu><MenuTrigger asChild><Button variant="secondary" aria-label="More visit actions"><MoreHorizontal className="size-4" /></Button></MenuTrigger>
+            <MenuContent><MenuItem onSelect={() => ui.evi({ prep: { patientId: p.id, apptId: v.apptId } })}><Sparkles className="size-4 text-primary" />Prepare with EVI</MenuItem><MenuItem onSelect={() => router.push(`/patients/${p.id}`)}>Open patient</MenuItem><MenuItem onSelect={() => router.push(`/patients/${p.id}?tab=visits`)}>All visits for this patient</MenuItem></MenuContent></Menu>
+          {!locked && <Button variant="secondary" disabled={!dirty} loading={saveVisit.pending || savePlot.pending} onClick={() => save()}>Save draft</Button>}
+          {!locked && (
+            <div className="flex">
+              <Button className="rounded-r-none" onClick={() => { setOverride({ on: false, reason: "" }); setDone(true); }}><Check className="size-4" />Complete visit</Button>
+              <Menu><MenuTrigger asChild><Button aria-label="More completion options" className="rounded-l-none border-l border-white/30 px-2"><ChevronDown className="size-4" /></Button></MenuTrigger>
+                <MenuContent><MenuItem onSelect={() => { setAfterTab("billing"); setOverride({ on: false, reason: "" }); setDone(true); }}>Complete and go to billing</MenuItem></MenuContent></Menu>
+            </div>)}
         </div>
+      </header>
+      {!locked && <BeforeYouStart v={draft} p={p} />}
+
+      <div role="tablist" aria-label="Visit sections" className="mb-5 flex gap-1 overflow-x-auto border-b border-line scroll-thin">
+        {tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => go(k)} className={cn("relative whitespace-nowrap px-3 py-2.5 text-sm font-medium after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:rounded", tab === k ? "text-primary after:bg-primary" : "text-muted hover:text-ink")}>{l}</button>)}
       </div>
-      {locked && <div className="mb-4"><Alert tone="success" title="This visit is completed">Documentation is read-only.</Alert></div>}
+      <div role="tabpanel">{body()}</div>
 
-      <Tabs defaultValue="summary">
-        <TabsList>{["Summary", "Notes", "Treatment", "Forms", "Photos", "Follow-up"].map((t) => <TabsTrigger key={t} value={t.toLowerCase()}>{t}</TabsTrigger>)}</TabsList>
-
-        <TabsContent value="summary">
-          <div className="grid gap-5 lg:grid-cols-2">
-            <Panel><PanelHeader title="Reason for visit" /><div className="p-4">
-              <Textarea disabled={locked} aria-label="Reason for visit" value={draft.reason} onChange={(e) => setDraft({ ...draft, reason: e.target.value })} onBlur={() => draft.reason !== v.reason && save({ reason: draft.reason })} placeholder="Why is the patient here today?" />
-              {appt && <p className="mt-2 text-xs text-muted">Booked appointment: {refs?.services.find((s) => s.id === appt.serviceId)?.name}</p>}</div></Panel>
-            <Panel><PanelHeader title="Previous visit" action={prev && <Link href={`/visits/${prev.id}`} className="text-[13px] font-medium text-primary hover:underline">Open</Link>} />
-              {prev ? <div className="space-y-1 p-4 text-[13px]"><p className="font-medium">{fmtDate(prev.date, true)} · {prev.type}</p><p className="text-muted">{prev.reason}</p><p>{prev.notes.plan}</p></div> : <EmptyState title="No previous visit" />}</Panel>
-            <Panel><PanelHeader title="Relevant history" />
-              <ul className="divide-y divide-line">{(visits ?? []).filter((x) => x.patientId === p.id && x.id !== v.id).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4).map((x) => (
-                <li key={x.id} className="px-4 py-2.5 text-[13px]"><span className="font-medium">{fmtDate(x.date)}</span> · {x.type}<span className="block text-muted">{x.reason}</span></li>))}
-                {(visits ?? []).filter((x) => x.patientId === p.id && x.id !== v.id).length === 0 && <li className="px-4 py-3 text-[13px] text-muted">No previous history on file.</li>}</ul></Panel>
-            <Panel><PanelHeader title="Current treatment" action={<Button size="sm" variant="secondary" onClick={() => router.push(`/visits/${v.id}/plotting`)}>Injection plotting</Button>} />
-              {draft.treatments.length ? <ul className="divide-y divide-line">{draft.treatments.map((t) => <li key={t.id} className="px-4 py-2.5 text-[13px]"><span className="font-medium">{t.product}</span> · {t.units} units<span className="block text-muted">{t.area}</span></li>)}</ul> : <p className="p-4 text-[13px] text-muted">No treatment documented yet.</p>}</Panel>
-            <Panel className="lg:col-span-2"><PanelHeader title="Follow-up" />
-              <div className="p-4 text-[13px]">{draft.followUpRecommended ? <p><span className="text-muted">Recommended:</span> {draft.followUpRecommended}</p> : <p className="text-muted">No follow-up recommended yet.</p>}
-                {myFu.length > 0 && <p className="mt-1"><span className="text-muted">Open:</span> {myFu.map((f) => `${f.type} (${fmtDate(f.due)})`).join(", ")}</p>}</div></Panel>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="notes">
-          <Panel><PanelHeader title="Clinical notes" sub={locked ? "Read-only" : "Saved automatically when you leave a field"} />
-            <div className="grid gap-4 p-4 md:grid-cols-2">
-              {([["subjective", "Subjective: history and patient report"], ["objective", "Objective: findings"], ["assessment", "Assessment"], ["plan", "Plan and instructions"]] as const).map(([k, l]) => (
-                <Field key={k} label={l}><Textarea disabled={locked} className="min-h-28" value={draft.notes[k]} onChange={(e) => setDraft({ ...draft, notes: { ...draft.notes, [k]: e.target.value } })}
-                  onBlur={() => draft.notes[k] !== v.notes[k] && save({ notes: draft.notes }).then(() => toast.success("Note saved"))} /></Field>
-              ))}
-            </div></Panel>
-        </TabsContent>
-
-        <TabsContent value="treatment"><TreatmentTab v={draft} locked={locked} save={save} /></TabsContent>
-
-        <TabsContent value="forms">
-          <Panel><PanelHeader title="Forms and documents" action={!locked && (
-            <Select sm className="w-44" aria-label="Add form" value="" onChange={(e) => { if (!e.target.value) return; const [kind, name] = e.target.value.split("|"); save({ forms: [...draft.forms, { id: `f${Date.now()}`, name, kind: kind as never, signed: false }] }); toast.success(`${name} added`); }}>
-              <option value="">Add form…</option><option value="Consent|Treatment consent">Treatment consent</option><option value="Clinical form|Medical history form">Medical history form</option><option value="Document|Photo release">Photo release</option></Select>)} />
-            {draft.forms.length === 0 ? <EmptyState title="No forms attached" text="Add a consent or clinical form for this visit." /> : (
-              <ul className="divide-y divide-line">{draft.forms.map((f) => (
-                <li key={f.id} className="flex items-center gap-3 px-4 py-3 text-[13px]"><FileText className="size-4 text-muted" /><span className="flex-1"><span className="font-medium">{f.name}</span><br /><span className="text-muted">{f.kind}</span></span>
-                  <Badge tone={f.signed ? "mint" : "peach"}>{f.signed ? "Signed" : "Awaiting signature"}</Badge>
-                  {!f.signed && !locked && <Button size="sm" variant="secondary" onClick={() => save({ forms: draft.forms.map((x) => x.id === f.id ? { ...x, signed: true } : x) }).then(() => toast.success("Marked as signed"))}>Mark as signed</Button>}</li>))}</ul>)}</Panel>
-        </TabsContent>
-
-        <TabsContent value="photos">
-          <div className="grid gap-5 md:grid-cols-3">
-            {(["Before", "During", "After"] as const).map((stage) => {
-              const list = draft.photos.filter((x) => x.stage === stage);
-              return (
-                <Panel key={stage}><PanelHeader title={stage} action={!locked && <Button size="sm" variant="secondary" onClick={() => { save({ photos: [...draft.photos, { id: `ph${Date.now()}`, stage, label: ["Front view", "Left profile", "Right profile"][list.length % 3] }] }); toast.success("Photo added"); }}><Camera className="size-4" />Add</Button>} />
-                  {list.length === 0 ? <p className="p-4 text-[13px] text-muted">No {stage.toLowerCase()} photos.</p> : (
-                    <ul className="grid grid-cols-2 gap-3 p-4">{list.map((ph) => <li key={ph.id}><div className="grid aspect-[4/5] place-items-center rounded-lg bg-cloud text-muted"><Camera className="size-6" aria-hidden /></div><p className="mt-1 text-xs text-muted">{ph.label}</p></li>)}</ul>)}</Panel>
-              );
-            })}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="follow-up">
-          <div className="grid gap-5 lg:grid-cols-2">
-            <Panel><PanelHeader title="Instructions and recommendation" /><div className="space-y-4 p-4">
-              <Field label="Patient instructions"><Textarea disabled={locked} value={draft.followUpInstructions} onChange={(e) => setDraft({ ...draft, followUpInstructions: e.target.value })} onBlur={() => draft.followUpInstructions !== v.followUpInstructions && save({ followUpInstructions: draft.followUpInstructions })} /></Field>
-              <Field label="Recommended follow-up"><Input disabled={locked} placeholder="e.g. Post-treatment review in 2 weeks" value={draft.followUpRecommended} onChange={(e) => setDraft({ ...draft, followUpRecommended: e.target.value })} onBlur={() => draft.followUpRecommended !== v.followUpRecommended && save({ followUpRecommended: draft.followUpRecommended })} /></Field></div></Panel>
-            <Panel><PanelHeader title="Next appointment" />
-              <div className="space-y-3 p-4 text-[13px]">
-                <p className="text-muted">{(appts ?? []).some((a) => a.patientId === p.id && a.date > v.date && !["cancelled", "no_show"].includes(a.status)) ? "A future appointment is already scheduled." : "No next appointment scheduled."}</p>
-                <div className="flex flex-wrap gap-2"><Button onClick={() => ui.newAppt({ patientId: p.id, providerId: v.providerId })}>Schedule next appointment</Button><Button variant="secondary" onClick={() => ui.newFollowUp({ patientId: p.id, visitId: v.id })}>Add follow-up</Button></div>
-                {myFu.length > 0 && <ul className="mt-2 space-y-1">{myFu.map((f) => <li key={f.id}>{f.type} · due {fmtDate(f.due)}</li>)}</ul>}</div></Panel>
-          </div>
-        </TabsContent>
-      </Tabs>
-
-      <ConfirmDialog open={confirm} onOpenChange={setConfirm} title="Complete this visit?" description={`Documentation for ${pname(v.patientId)} will become read-only. A follow-up will be created if one is recommended.`}
-        cancelLabel="Keep editing" confirmLabel="Complete visit" loading={complete.pending}
-        onConfirm={async () => { await complete.run(v.id); setConfirm(false); }} />
+      <Modal open={done} onOpenChange={setDone} title="Complete this visit?" width={520}
+        description={missing.length ? "Some configured requirements are not met yet." : `${p.first} ${p.last}'s documentation will become read-only. Stock is deducted and any recommended follow-up is created.`}
+        footer={<><Button variant="secondary" onClick={() => setDone(false)}>Keep editing</Button>
+          {missing.length > 0 && canOverride && !override.on && <Button variant="secondary" onClick={() => setOverride({ on: true, reason: "" })}>Complete anyway</Button>}
+          <Button disabled={(missing.length > 0 && !(override.on && override.reason.trim().length > 3))} loading={complete.pending || consume.pending} onClick={() => finish(afterTab ?? undefined)}>Complete visit</Button></>}>
+        <ul className="space-y-1.5">{reqs.map((r) => <li key={r.label} className="flex items-center gap-2.5 text-[13px]">{r.ok ? <Check className="size-4 text-[#2A8577]" /> : <X className="size-4 text-[#9A6200]" />}<span className={r.ok ? "text-muted" : "font-medium"}>{r.label}</span>{!r.ok && <button className="ml-auto text-xs font-medium text-primary hover:underline" onClick={() => { setDone(false); go(r.tab); }}>Fix</button>}</li>)}{reqs.length === 0 && <li className="text-[13px] text-muted">No requirements configured for this service.</li>}</ul>
+        {override.on && <div className="mt-4"><Field label="Reason for completing without requirements" required><Input value={override.reason} onChange={(e) => setOverride({ ...override, reason: e.target.value })} /></Field><p className="mt-1 text-xs text-muted">This override is written to the audit log.</p></div>}
+      </Modal>
+      <ConfirmDialog open={!!leave} onOpenChange={(o) => !o && setLeave(null)} title="Leave without saving?" description="You have unsaved changes in this visit. Leaving now will discard them." cancelLabel="Stay on visit" confirmLabel="Discard and leave" danger
+        onConfirm={() => { const to = leave!; base.current = snap(draft); setLeave(null); setTimeout(() => router.push(to), 0); }} />
     </>
-  );
-}
-
-function TreatmentTab({ v, locked, save }: { v: Visit; locked: boolean; save: (p: Partial<Visit>) => Promise<unknown> }) {
-  const router = useRouter();
-  const [adding, setAdding] = useState(false);
-  const [t, setT] = useState({ service: "Injectable treatment", area: "", product: "", units: "", notes: "" });
-  const [err, setErr] = useState("");
-  const { data: refs } = useRefs();
-  const add = async () => {
-    if (!t.area.trim() || !t.product.trim()) return setErr("Treatment area and product are required");
-    const line: TreatmentLine = { id: `t${Date.now()}`, service: t.service, area: t.area, product: t.product, units: Number(t.units) || 0, notes: t.notes };
-    await save({ treatments: [...v.treatments, line] });
-    toast.success("Treatment added"); setAdding(false); setT({ service: "Injectable treatment", area: "", product: "", units: "", notes: "" }); setErr("");
-  };
-  return (
-    <div className="space-y-5">
-      <Panel><PanelHeader title="Treatments performed" action={!locked && <Button size="sm" onClick={() => setAdding(true)}><Plus className="size-4" />Add treatment</Button>} />
-        {v.treatments.length === 0 && !adding ? <EmptyState title="No treatment documented" text="Add services, areas, products and units." /> : (
-          <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-[13px]"><thead className="border-b border-line bg-cloud/50 text-left text-xs uppercase tracking-wide text-muted"><tr><th className="px-4 py-2.5 font-medium">Service</th><th className="px-4 py-2.5 font-medium">Area</th><th className="px-4 py-2.5 font-medium">Product</th><th className="px-4 py-2.5 font-medium">Units</th><th className="px-4 py-2.5 font-medium">Notes</th><th /></tr></thead>
-            <tbody className="divide-y divide-line">{v.treatments.map((x) => (
-              <tr key={x.id}><td className="px-4 py-3">{x.service}</td><td className="px-4 py-3">{x.area}</td><td className="px-4 py-3">{x.product}</td><td className="px-4 py-3">{x.units}</td><td className="px-4 py-3 text-muted">{x.notes || "—"}</td>
-                <td className="px-4 py-3 text-right">{!locked && <button aria-label="Remove treatment" className="rounded p-1.5 text-muted hover:bg-cloud hover:text-danger" onClick={() => save({ treatments: v.treatments.filter((y) => y.id !== x.id) })}><Trash2 className="size-4" /></button>}</td></tr>))}</tbody></table></div>)}
-        {adding && (
-          <div className="anim-fade space-y-3 border-t border-line bg-cloud/40 p-4">
-            <div className="grid gap-3 md:grid-cols-4">
-              <Field label="Service"><Select value={t.service} onChange={(e) => setT({ ...t, service: e.target.value })}>{refs?.services.map((s) => <option key={s.id}>{s.name}</option>)}</Select></Field>
-              <Field label="Treatment area" required><Input value={t.area} onChange={(e) => setT({ ...t, area: e.target.value })} placeholder="e.g. Forehead" /></Field>
-              <Field label="Product" required><Input value={t.product} onChange={(e) => setT({ ...t, product: e.target.value })} placeholder="e.g. Botulinum toxin A" /></Field>
-              <Field label="Units"><Input type="number" min={0} step="0.1" value={t.units} onChange={(e) => setT({ ...t, units: e.target.value })} /></Field>
-            </div>
-            <Field label="Notes"><Input value={t.notes} onChange={(e) => setT({ ...t, notes: e.target.value })} /></Field>
-            {err && <p role="alert" className="text-xs text-danger">{err}</p>}
-            <div className="flex justify-end gap-2"><Button size="sm" variant="secondary" onClick={() => setAdding(false)}>Cancel</Button><Button size="sm" onClick={add}>Add treatment</Button></div>
-          </div>)}
-      </Panel>
-      <Panel><PanelHeader title="Injection plotting" sub="Document injection points on the anatomical map" action={<Button size="sm" variant="secondary" onClick={() => router.push(`/visits/${v.id}/plotting`)}>{locked ? "View plot" : "Open injection plotting"}</Button>} />
-        <PlotSummary visit={v} /></Panel>
-    </div>
   );
 }

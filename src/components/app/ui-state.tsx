@@ -8,10 +8,12 @@ export interface UIState {
   newAppt: (prefill?: Partial<AppointmentInput>) => void;
   newPatient: () => void;
   newFollowUp: (prefill?: { patientId?: string; visitId?: string }) => void;
-  newVisit: () => void;
+  newVisit: (prefill?: { patientId?: string }) => void;
   evi: (o?: EviOpen) => void;
   openSearch: () => void;
   guide: () => void;
+  openAgents: () => void;
+  checkout: (apptId: string) => void;
 }
 export const UICtx = createContext<UIState | null>(null);
 export const useUI = () => {

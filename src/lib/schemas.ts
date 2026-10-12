@@ -51,7 +51,7 @@ export const practiceDetailsSchema = z.object({
 export const patientSchema = z.object({
   first: z.string().min(1, "First name is required"),
   last: z.string().min(1, "Last name is required"),
-  dob: z.string().min(1, "Date of birth is required").refine((v) => new Date(v) < new Date("2026-10-08"), "Date of birth must be in the past"),
+  dob: z.string().refine((v) => !v || new Date(v) < new Date("2026-10-08"), "Date of birth must be in the past"),
   phone: z.string().min(7, "Enter a valid phone number"),
   email: z.string().min(1, "Email is required").email("Enter a valid email address"),
   gender: z.string().optional(),
@@ -59,6 +59,7 @@ export const patientSchema = z.object({
   emergency: z.string().optional(),
   providerId: z.string().optional(),
   notes: z.string().optional(),
+  portrait: z.string().optional(),
 });
 
 export const appointmentSchema = z.object({

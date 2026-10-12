@@ -3,40 +3,43 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  BarChart3, Bell, CalendarDays, ChevronsLeft, ChevronsRight, ClipboardList, DoorClosed, HelpCircle, LayoutGrid,
+  BarChart3, Bell, CalendarDays, ChevronsLeft, ChevronsRight, HelpCircle, LayoutGrid,
   Layers, LogOut, MapPin, MoreHorizontal, Plus, Repeat, Search, Settings, Sparkles, Stethoscope, UserRound, Users,
-  CalendarPlus, UserPlus, FilePlus2, BellPlus, Bot, type LucideIcon,
+  CalendarPlus, UserPlus, FilePlus2, BellPlus, Bot, Package, FileText, ChevronDown, ShieldCheck, type LucideIcon,
 } from "lucide-react";
 import { Avatar, Logo, Menu, MenuContent, MenuItem, MenuLabel, MenuSep, MenuTrigger, Skeleton } from "@/components/ui";
 import { auth, useSession } from "@/lib/auth";
-import { useAction, useNotifications } from "@/lib/hooks";
+import { useAction, useNotifications, useRole } from "@/lib/hooks";
+import { ROLE_PERMS, saveRole, type PermKey, type Role } from "@/lib/clinical";
 import { api } from "@/lib/db";
 import type { AppointmentInput } from "@/lib/schemas";
 import { cn } from "@/lib/utils";
 import { UICtx, type EviOpen, type UIState } from "./ui-state";
 import { AppointmentPanel, NewAppointmentPanel, NewFollowUpPanel, NewPatientPanel, NewVisitDialog } from "./panels";
 import { EviDialog } from "./evi";
+import { EviLauncher } from "./evi-launcher";
 import { SearchDialog } from "./search";
 import { GuidePanel } from "./guide";
+import { CheckoutDialog } from "./checkout";
 import { toast } from "sonner";
 
-const MAIN: { href: string; label: string; icon: LucideIcon }[] = [
-  { href: "/overview", label: "Overview", icon: LayoutGrid },
+type NavItem = { href: string; label: string; icon: LucideIcon; perm?: PermKey };
+const MAIN: NavItem[] = [
+  { href: "/overview", label: "Today", icon: LayoutGrid },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/patients", label: "Patients", icon: Users },
-  { href: "/front-desk", label: "Front desk", icon: ClipboardList },
-  { href: "/visits", label: "Visits", icon: Stethoscope },
   { href: "/follow-ups", label: "Follow-ups", icon: Repeat },
-  { href: "/reports", label: "Reports", icon: BarChart3 },
+  { href: "/reports", label: "Reports", icon: BarChart3, perm: "reports" },
 ];
-const PRACTICE: typeof MAIN = [
-  { href: "/practice/providers", label: "Providers", icon: UserRound },
+const PRACTICE: NavItem[] = [
+  { href: "/practice/team", label: "Team", icon: UserRound },
   { href: "/practice/services", label: "Services & treatments", icon: Layers },
-  { href: "/practice/locations", label: "Locations", icon: MapPin },
-  { href: "/practice/rooms", label: "Rooms & resources", icon: DoorClosed },
+  { href: "/practice/inventory", label: "Inventory", icon: Package, perm: "inventory" },
+  { href: "/practice/locations", label: "Locations & rooms", icon: MapPin },
+  { href: "/practice/forms", label: "Forms", icon: FileText },
 ];
 
-function NavLink({ item, collapsed, active }: { item: (typeof MAIN)[number]; collapsed: boolean; active: boolean }) {
+function NavLink({ item, collapsed, active }: { item: NavItem; collapsed: boolean; active: boolean }) {
   return (
     <Link href={item.href} title={collapsed ? item.label : undefined} aria-current={active ? "page" : undefined}
       className={cn("flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-[13.5px] font-medium transition-colors", active ? "bg-active text-primary" : "text-slate-600 hover:bg-cloud hover:text-ink", collapsed ? "justify-center" : "justify-start")}>
@@ -55,11 +58,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [newAppt, setNewAppt] = useState<{ open: boolean; prefill?: Partial<AppointmentInput> }>({ open: false });
   const [newPatient, setNewPatient] = useState(false);
   const [newFu, setNewFu] = useState<{ open: boolean; prefill?: { patientId?: string; visitId?: string } }>({ open: false });
-  const [newVisit, setNewVisit] = useState(false);
+  const [newVisit, setNewVisit] = useState<{ open: boolean; patientId?: string }>({ open: false });
   const [evi, setEvi] = useState<{ open: boolean; init: EviOpen }>({ open: false, init: {} });
   const [searchOpen, setSearchOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [checkoutId, setCheckoutId] = useState<string | null>(null);
   const { data: notes } = useNotifications();
+  const { role, can } = useRole();
   const markRead = useAction(api.markNotifications);
 
   useEffect(() => { if (session === null) router.replace("/sign-in"); }, [session, router]);
@@ -71,11 +76,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     newAppt: (prefill) => setNewAppt({ open: true, prefill }),
     newPatient: () => setNewPatient(true),
     newFollowUp: (prefill) => setNewFu({ open: true, prefill }),
-    newVisit: () => setNewVisit(true),
+    newVisit: (prefill) => setNewVisit({ open: true, patientId: prefill?.patientId }),
     evi: (o = {}) => setEvi({ open: true, init: o }),
     openSearch: () => setSearchOpen(true),
     guide: () => setGuideOpen(true),
-  }), []);
+    openAgents: () => router.push("/agents"),
+    checkout: setCheckoutId,
+  }), [router]);
 
   const onKey = useCallback((e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setSearchOpen(true); }
@@ -105,14 +112,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {collapsed ? <ChevronsRight className="size-3.5" /> : <ChevronsLeft className="size-3.5" />}
         </button>
         <nav aria-label="Primary" className="scroll-thin flex-1 space-y-0.5 overflow-y-auto p-3">
-          {MAIN.map((i) => <NavLink key={i.href} item={i} collapsed={collapsed} active={isActive(i.href)} />)}
+          {MAIN.filter((i) => !i.perm || can(i.perm)).map((i) => <NavLink key={i.href} item={i} collapsed={collapsed} active={isActive(i.href)} />)}
           <p className={cn("px-2.5 pb-1 pt-5 text-[11px] font-medium uppercase tracking-wider text-muted", collapsed ? "sr-only" : "")}>Practice</p>
           <div className={cn("my-3 h-px bg-line", collapsed ? "" : "hidden")} />
-          {PRACTICE.map((i) => <NavLink key={i.href} item={i} collapsed={collapsed} active={isActive(i.href)} />)}
-          <NavLink item={{ href: "/agents", label: "AI agents", icon: Bot }} collapsed={collapsed} active={isActive("/agents")} />
+          {PRACTICE.filter((i) => !i.perm || can(i.perm)).map((i) => <NavLink key={i.href} item={i} collapsed={collapsed} active={isActive(i.href)} />)}
         </nav>
         <div className="space-y-0.5 border-t border-line p-3">
-          <NavLink item={{ href: "/practice/settings", label: "Settings", icon: Settings }} collapsed={collapsed} active={isActive("/practice/settings")} />
+          {can("settings") && <NavLink item={{ href: "/practice/settings", label: "Settings", icon: Settings }} collapsed={collapsed} active={isActive("/practice/settings")} />}
           <button onClick={() => setGuideOpen(true)} className={cn("flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[13.5px] font-medium text-slate-600 hover:bg-cloud", collapsed ? "justify-center" : "justify-start")}>
             <HelpCircle className="size-[18px]" strokeWidth={1.8} aria-hidden /><span className={collapsed ? "sr-only" : ""}>Help</span>
           </button>
@@ -143,7 +149,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <MenuItem onSelect={() => ui.newVisit()}><FilePlus2 className="size-4 text-muted" />New visit</MenuItem>
                 <MenuItem onSelect={() => ui.newFollowUp()}><BellPlus className="size-4 text-muted" />New follow-up</MenuItem>
                 <MenuSep />
-                <MenuItem onSelect={() => router.push("/practice/providers")}><UserRound className="size-4 text-muted" />New provider</MenuItem>
+                <MenuItem onSelect={() => router.push("/practice/team")}><UserRound className="size-4 text-muted" />New provider</MenuItem>
                 <MenuItem onSelect={() => router.push("/practice/services")}><Layers className="size-4 text-muted" />New service</MenuItem>
               </MenuContent>
             </Menu>
@@ -168,21 +174,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </MenuContent>
             </Menu>
             <Menu>
-              <MenuTrigger asChild><button aria-label="Help" className="hidden size-10 place-items-center rounded-lg text-slate-600 hover:bg-cloud sm:grid"><HelpCircle className="size-[18px]" /></button></MenuTrigger>
-              <MenuContent>
-                <MenuLabel>Help</MenuLabel>
-                <MenuItem onSelect={() => setGuideOpen(true)}>Quick guide</MenuItem>
-                <MenuItem onSelect={() => toast("Search: Ctrl K · Ask EVI: Ctrl J")}>Keyboard shortcuts</MenuItem>
-                <MenuItem onSelect={() => ui.evi({ prompt: "What needs attention today?" })}>Ask EVI for help</MenuItem>
-                <MenuItem onSelect={() => toast.success("Support request sent")}>Contact support</MenuItem>
-              </MenuContent>
-            </Menu>
-            <Menu>
-              <MenuTrigger asChild><button aria-label="Account menu" className="rounded-full"><Avatar name={session.name} size={34} /></button></MenuTrigger>
+              <MenuTrigger asChild><button aria-label="Account menu" className="flex items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-cloud"><Avatar name={session.name} size={34} /><span className="hidden text-left leading-tight lg:block"><span className="block text-[13px] font-medium">{session.name.replace("Aarav ", "")}</span><span className="block text-xs text-muted">Main Clinic</span></span><ChevronDown className="hidden size-4 text-muted lg:block" /></button></MenuTrigger>
               <MenuContent>
                 <div className="px-2.5 py-2"><p className="text-sm font-medium">{session.name}</p><p className="text-xs text-muted">{session.email}</p></div>
                 <MenuSep />
-                <MenuItem onSelect={() => router.push("/practice/settings")}><Settings className="size-4 text-muted" />Practice settings</MenuItem>
+                <MenuLabel>View as role (demo)</MenuLabel>
+                {(Object.keys(ROLE_PERMS) as Role[]).map((r) => <MenuItem key={r} onSelect={() => { saveRole(r); toast.success(`Now viewing as ${r}`); router.push("/overview"); }}><ShieldCheck className={cn("size-4", r === role ? "text-primary" : "text-muted")} />{r}{r === role && <span className="ml-auto text-xs text-primary">Current</span>}</MenuItem>)}
+                <MenuSep />
+                {can("settings") && <MenuItem onSelect={() => router.push("/practice/settings")}><Settings className="size-4 text-muted" />Practice settings</MenuItem>}
                 <MenuItem onSelect={() => { auth.signOut(); router.replace("/sign-in"); }}><LogOut className="size-4 text-muted" />Sign out</MenuItem>
               </MenuContent>
             </Menu>
@@ -201,7 +200,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <Menu>
           <MenuTrigger asChild><button className="flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium text-muted"><MoreHorizontal className="size-5" aria-hidden />More</button></MenuTrigger>
           <MenuContent side="top" align="end">
-            {[...MAIN.slice(3).filter((m) => m.href !== "/visits"), { href: "/agents", label: "AI agents", icon: Bot }, ...PRACTICE, { href: "/practice/settings", label: "Settings", icon: Settings }].map((i) => (
+            {[{ href: "/follow-ups", label: "Follow-ups", icon: Repeat }, { href: "/reports", label: "Reports", icon: BarChart3 }, { href: "/agents", label: "EVI agents", icon: Bot }, ...PRACTICE, { href: "/practice/settings", label: "Settings", icon: Settings }].map((i) => (
               <MenuItem key={i.href} onSelect={() => router.push(i.href)}><i.icon className="size-4 text-muted" />{i.label}</MenuItem>
             ))}
           </MenuContent>
@@ -212,8 +211,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <NewAppointmentPanel open={newAppt.open} prefill={newAppt.prefill} onClose={() => setNewAppt({ open: false })} />
       <NewPatientPanel open={newPatient} onClose={() => setNewPatient(false)} />
       <NewFollowUpPanel open={newFu.open} prefill={newFu.prefill} onClose={() => setNewFu({ open: false })} />
-      <NewVisitDialog open={newVisit} onClose={() => setNewVisit(false)} />
+      <NewVisitDialog open={newVisit.open} patientId={newVisit.patientId} onClose={() => setNewVisit({ open: false })} />
+      {!evi.open && <EviLauncher onOpen={() => ui.evi()} />}
       <EviDialog open={evi.open} initial={evi.init} onClose={() => setEvi((e) => ({ ...e, open: false }))} />
+      <CheckoutDialog apptId={checkoutId} onClose={() => setCheckoutId(null)} />
       <GuidePanel open={guideOpen} onClose={() => setGuideOpen(false)} />
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
     </UICtx.Provider>

@@ -23,3 +23,10 @@ npm run build
 - `src/components/app` shell, panels (appointment, new appointment / patient / follow-up / visit), EVI, global search
 - `src/lib/insight.ts` EVI intent engine, agents, visit-preparation summaries (documented information only; no clinical recommendations)
 - Logo: `public/logo.webp` is the supplied asset, unmodified; it is only cropped with CSS in `Logo`.
+
+## Clinical workspace (spec update)
+
+- Today, Calendar, Front desk (with checkout), Patients, Patient Workspace (Summary, Journey, Visits, Treatments, Photos, Documents, Forms, Financials, Follow-ups, Communication), Visit workspace (notes templates, treatment, injection plotting with versions, products, photos, consent, follow-up, plan, billing), Inventory, Form builder, Settings, Agents directory, EVI side panel.
+- **Clinic type** (Settings, Practice profile) changes visit tabs, note labels and photo checklists. **Roles** (account menu, "View as role") gate photos, notes, financials, inventory, reports and settings.
+- **Demo portraits** in `public/people/` are licensed stock photos from Pexels (free for commercial use). They are illustrative and do not depict real patients. Before/after sets use the same portrait with different crops and are labelled as demo.
+- Not implemented / boundaries: card processing, SMS/email delivery, e-signatures (typed names only), live AI (EVI and agents are rule-based), AI Scribe and AI Receptionist, EVOQ Billing/Campaigns/Messaging connections, logo upload, patient portal, data persistence (resets on reload).

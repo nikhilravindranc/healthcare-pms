@@ -9,9 +9,36 @@ import { useAction, useAppointments, usePatients, useRefs, useVisits, useFollowU
 import { api, checkConflicts, fmtDate, fmtTime, freeSlots, fromMin, TODAY, addDays, nowMin } from "@/lib/db";
 import { appointmentSchema, patientSchema, type AppointmentInput, type PatientInput } from "@/lib/schemas";
 import { useUI } from "./ui-state";
+import { PatientAvatar, PortraitField } from "./photos";
 import { toast } from "sonner";
 import type { FollowUpType } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { getSettings } from "@/lib/settings";
+
+/** Patient field. Locked to the current patient when opened from their record; "Change" reveals the list. */
+function PatientPicker({ value, onChange, patients, locked, lockedId, error }: { value: string; onChange: (id: string) => void; patients: { id: string; first: string; last: string }[]; locked: boolean; lockedId?: string; error?: string }) {
+  const [changing, setChanging] = useState(false);
+  useEffect(() => { setChanging(false); }, [locked]);
+  const cur = patients.find((x) => x.id === value);
+  if (locked && cur && !changing) {
+    return (
+      <div className="space-y-1.5"><p className="text-[13px] font-medium">Patient</p>
+        <div className="flex items-center gap-3 rounded-lg border border-line bg-cloud/50 px-3 py-2"><PatientAvatar id={cur.id} name={`${cur.first} ${cur.last}`} size={36} /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{cur.first} {cur.last}</p><p className="text-xs text-muted">{cur.id}</p></div>
+          <button type="button" onClick={() => setChanging(true)} className="text-[13px] font-medium text-primary hover:underline">Change</button></div></div>
+    );
+  }
+  const other = locked && lockedId && value && value !== lockedId;
+  const orig = patients.find((x) => x.id === lockedId);
+  return (
+    <div className="space-y-2">
+      <Field label="Patient" required error={error}>
+        <Select value={value} onChange={(e) => onChange(e.target.value)}><option value="">Select patient</option>{patients.map((p) => <option key={p.id} value={p.id}>{p.first} {p.last} · {p.id}</option>)}</Select>
+      </Field>
+      {other && <Alert tone="warn" title="Different patient selected" action={orig && <Button type="button" size="sm" variant="secondary" onClick={() => { onChange(orig.id); setChanging(false); }}>Use {orig.first}</Button>}>This is not the patient whose record you opened.</Alert>}
+      {locked && !other && orig && <button type="button" onClick={() => setChanging(false)} className="text-[13px] font-medium text-primary hover:underline">Keep {orig.first} {orig.last}</button>}
+    </div>
+  );
+}
 
 export const waitLabel = (now: number, arrivedAt?: number) => (arrivedAt == null ? "—" : `${Math.max(0, now - arrivedAt)} min`);
 
@@ -160,7 +187,7 @@ export function NewAppointmentPanel({ open, onClose, prefill }: { open: boolean;
     <Sheet open={open} onOpenChange={(o) => !o && onClose()} title={created ? "Appointment scheduled" : "New appointment"} description={created ? undefined : "Schedule a patient with a provider."}
       footer={created ? (
         <><Button variant="secondary" onClick={onClose}>Done</Button>
-          <Button variant="secondary" onClick={() => { onClose(); router.push(`/patients/${created.patientId}`); }}>Open patient</Button>
+          {!prefill?.patientId && <Button variant="secondary" onClick={() => { onClose(); router.push(`/patients/${created.patientId}`); }}>Open patient</Button>}
           <Button onClick={() => { onClose(); ui.openAppt(created.id); }}>View appointment</Button></>
       ) : (
         <><Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -174,11 +201,7 @@ export function NewAppointmentPanel({ open, onClose, prefill }: { open: boolean;
         </div>
       ) : !refs || !patients ? <div className="space-y-4">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-10" />)}</div> : (
         <form className="space-y-4" noValidate onSubmit={(e) => e.preventDefault()}>
-          <Field label="Patient" required error={errors.patientId?.message}>
-            <Select value={v.patientId} onChange={(e) => f.setValue("patientId", e.target.value, { shouldValidate: true })}>
-              <option value="">Select patient</option>{patients.map((p) => <option key={p.id} value={p.id}>{p.first} {p.last} · {p.id}</option>)}
-            </Select>
-          </Field>
+          <PatientPicker value={v.patientId} onChange={(id) => f.setValue("patientId", id, { shouldValidate: true })} patients={patients} locked={!!prefill?.patientId} lockedId={prefill?.patientId} error={errors.patientId?.message} />
           <Field label="Provider" required error={errors.providerId?.message}>
             <Select value={v.providerId} onChange={(e) => onProvider(e.target.value)}><option value="">Select provider</option>{refs.providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
           </Field>
@@ -220,9 +243,10 @@ export function NewPatientPanel({ open, onClose }: { open: boolean; onClose: () 
   const router = useRouter();
   const [created, setCreated] = useState<{ id: string; name: string } | null>(null);
   const [more, setMore] = useState(false);
+  const [portrait, setPortrait] = useState<string | undefined>();
   const create = useAction(api.createPatient);
   const f = useForm<PatientInput>({ resolver: zodResolver(patientSchema), defaultValues: { first: "", last: "", dob: "", phone: "", email: "", gender: "", address: "", emergency: "", providerId: "", notes: "" } });
-  useEffect(() => { if (open) { setCreated(null); setMore(false); f.reset(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open]);
+  useEffect(() => { if (open) { setCreated(null); setMore(false); setPortrait(undefined); f.reset(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open]);
   const e = f.formState.errors;
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()} title={created ? "Patient added" : "New patient"} description={created ? undefined : "Required fields are marked with an asterisk."}
@@ -232,7 +256,7 @@ export function NewPatientPanel({ open, onClose }: { open: boolean; onClose: () 
           <Button onClick={() => { onClose(); router.push(`/patients/${created.id}`); }}>View patient</Button></>
       ) : (
         <><Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button loading={create.pending} onClick={f.handleSubmit(async (d) => { const p = await create.run(d); setCreated({ id: p.id, name: `${p.first} ${p.last}` }); })}>Create patient</Button></>
+          <Button loading={create.pending} onClick={f.handleSubmit(async (d) => { if (getSettings().dobRequired && !d.dob) { f.setError("dob", { message: "Date of birth is required by your practice settings" }); return; } const p = await create.run({ ...d, portrait }); setCreated({ id: p.id, name: `${p.first} ${p.last}` }); })}>Create patient</Button></>
       )}>
       {created ? (
         <div className="anim-fade space-y-2 py-6 text-center"><CheckCircle2 className="mx-auto size-10 text-[#2A8577]" /><p className="text-base font-semibold">{created.name} was added</p><p className="text-sm text-muted">Patient ID {created.id}</p></div>
@@ -242,11 +266,12 @@ export function NewPatientPanel({ open, onClose }: { open: boolean; onClose: () 
             <Field label="First name" required error={e.first?.message}><Input {...f.register("first")} /></Field>
             <Field label="Last name" required error={e.last?.message}><Input {...f.register("last")} /></Field>
           </div>
-          <Field label="Date of birth" required error={e.dob?.message}><Input type="date" max={TODAY} {...f.register("dob")} /></Field>
+          <Field label="Date of birth" required={getSettings().dobRequired} error={e.dob?.message}><Input type="date" max={TODAY} {...f.register("dob")} /></Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Phone" required error={e.phone?.message}><Input type="tel" {...f.register("phone")} /></Field>
             <Field label="Email" required error={e.email?.message}><Input type="email" {...f.register("email")} /></Field>
           </div>
+          <PortraitField value={portrait} onChange={setPortrait} name={`${f.watch("first")} ${f.watch("last")}`.trim()} />
           <button type="button" onClick={() => setMore((m) => !m)} aria-expanded={more} className="flex items-center gap-1 text-[13px] font-medium text-primary">
             <ChevronDown className={cn("size-4 transition-transform", more && "rotate-180")} />Additional details
           </button>
@@ -279,7 +304,7 @@ export function NewFollowUpPanel({ open, onClose, prefill }: { open: boolean; on
       footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button>
         <Button loading={create.pending} onClick={async () => { if (!v.patientId) return setErr("Select a patient"); await create.run({ ...v, visitId: prefill?.visitId }); onClose(); }}>Add follow-up</Button></>}>
       <div className="space-y-4">
-        <Field label="Patient" required error={err}><Select value={v.patientId} onChange={(e) => { setV({ ...v, patientId: e.target.value }); setErr(""); }}><option value="">Select patient</option>{patients?.map((p) => <option key={p.id} value={p.id}>{p.first} {p.last}</option>)}</Select></Field>
+        <PatientPicker value={v.patientId} onChange={(id) => { setV({ ...v, patientId: id }); setErr(""); }} patients={patients ?? []} locked={!!prefill?.patientId} lockedId={prefill?.patientId} error={err} />
         <div className="grid grid-cols-2 gap-3">
           <Field label="Type"><Select value={v.type} onChange={(e) => setV({ ...v, type: e.target.value as FollowUpType })}>{["Post-treatment", "Routine review", "Treatment continuation", "Recall", "Other"].map((t) => <option key={t}>{t}</option>)}</Select></Field>
           <Field label="Due date"><Input type="date" value={v.due} onChange={(e) => setV({ ...v, due: e.target.value })} /></Field>
@@ -291,20 +316,26 @@ export function NewFollowUpPanel({ open, onClose, prefill }: { open: boolean; on
 }
 
 /* ---------- New visit ---------- */
-export function NewVisitDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function NewVisitDialog({ open, onClose, patientId }: { open: boolean; onClose: () => void; patientId?: string }) {
   const { data: patients } = usePatients();
   const { data: refs } = useRefs();
   const router = useRouter();
   const create = useAction(api.newVisit);
-  const [pid, setPid] = useState(""); const [prov, setProv] = useState("pat"); const [err, setErr] = useState("");
-  useEffect(() => { if (open) { setPid(""); setErr(""); } }, [open]);
+  const [pid, setPid] = useState(""); const [prov, setProv] = useState("pat"); const [svc, setSvc] = useState("consult"); const [err, setErr] = useState("");
+  useEffect(() => { if (open) { setPid(patientId ?? ""); setErr(""); const pr = patients?.find((x) => x.id === patientId)?.providerId; setProv(pr || "pat"); setSvc("consult"); } }, [open, patientId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const services = refs?.services.filter((s) => s.providerIds.includes(prov)) ?? [];
+  useEffect(() => { if (services.length && !services.some((s) => s.id === svc)) setSvc(services[0].id); }, [prov, refs]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <Modal open={open} onOpenChange={(o) => !o && onClose()} title="New visit" description="Start documenting a visit that is not linked to a scheduled appointment."
+    <Modal open={open} onOpenChange={(o) => !o && onClose()} title="Start visit" description="Start documenting a visit that is not linked to a scheduled appointment."
       footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button loading={create.pending} onClick={async () => { if (!pid) return setErr("Select a patient"); const v = await create.run(pid, prov); onClose(); router.push(`/visits/${v.id}`); }}>Start visit</Button></>}>
+        <Button loading={create.pending} onClick={async () => { if (!pid) return setErr("Select a patient"); const v = await create.run(pid, prov, svc); onClose(); toast.success("Visit started"); router.push(`/visits/${v.id}`); }}>Start visit</Button></>}>
       <div className="space-y-4">
-        <Field label="Patient" required error={err}><Select value={pid} onChange={(e) => { setPid(e.target.value); setErr(""); }}><option value="">Select patient</option>{patients?.map((p) => <option key={p.id} value={p.id}>{p.first} {p.last} · {p.id}</option>)}</Select></Field>
-        <Field label="Provider"><Select value={prov} onChange={(e) => setProv(e.target.value)}>{refs?.providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
+        <PatientPicker value={pid} onChange={(id) => { setPid(id); setErr(""); }} patients={patients ?? []} locked={!!patientId} lockedId={patientId} error={err} />
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Provider"><Select value={prov} onChange={(e) => setProv(e.target.value)}>{refs?.providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
+          <Field label="Service"><Select value={svc} onChange={(e) => setSvc(e.target.value)}>{services.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></Field>
+        </div>
+        <p className="text-xs text-muted">The service decides which tools appear in the visit, such as injection plotting for injectable treatments.</p>
       </div>
     </Modal>
   );
